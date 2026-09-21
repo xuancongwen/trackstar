@@ -1,0 +1,208 @@
+:root {
+  --bg: #e9ecef;
+  --panel: #f7f8fa;
+  --panel-head: #3d4a5c;
+  --panel-head-text: #fff;
+  --row: #fff;
+  --row-hover: #f1f6fd;
+  --row-started: #fffbe0;
+  --row-accepted: #e6f4e1;
+  --row-rejected: #fdeaea;
+  --border: #d5dae1;
+  --text: #1f2933;
+  --muted: #6b7785;
+  --accent: #2f6fb5;
+  --accent-text: #fff;
+  --danger: #c0392b;
+  --feature: #e0a800;
+  --bug: #d64545;
+  --chore: #7b8794;
+  --start: #e4e7eb;
+  --finish: #1f4e8c;
+  --deliver: #e67e22;
+  --accept: #4c9f38;
+  --shadow: 0 8px 30px rgba(15, 23, 42, 0.25);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12161c;
+    --panel: #1a2029;
+    --panel-head: #252e3b;
+    --panel-head-text: #e6eaf0;
+    --row: #212935;
+    --row-hover: #283241;
+    --row-started: #3a3620;
+    --row-accepted: #21382a;
+    --row-rejected: #40262a;
+    --border: #323c4b;
+    --text: #e3e8ee;
+    --muted: #94a1b2;
+    --accent: #5a9be0;
+    --accent-text: #0d1117;
+    --start: #3a4556;
+    --shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+input,
+select,
+textarea {
+  background: var(--row);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 7px;
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+button {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--row);
+  padding: 4px 10px;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+button.danger {
+  color: var(--danger);
+}
+
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+}
+
+a {
+  color: var(--accent);
+}
+
+kbd {
+  font: 11px ui-monospace, monospace;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  padding: 0 4px;
+  background: var(--row);
+  color: var(--text);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--danger);
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 15, 25, 0.45);
+  display: grid;
+  place-items: start center;
+  padding-top: 12vh;
+  z-index: 30;
+}
+
+.modal {
+  width: min(520px, calc(100vw - 24px));
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.modal h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.field {
+  display: grid;
+  gap: 3px;
+}
+
+.field > span {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.estimates {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.estimates button {
+  padding: 1px 6px;
+  min-width: 22px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.estimates button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.drag-ghost {
+  opacity: 0.35;
+}

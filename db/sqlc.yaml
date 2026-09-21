@@ -1,0 +1,16 @@
+version: "2"
+sql:
+  - engine: sqlite
+    schema: migrations/sqlite
+    queries: queries
+    gen:
+      go:
+        package: dbgen
+        out: ../internal/database/dbgen
+        emit_interface: true
+        emit_empty_slices: true
+        emit_json_tags: false
+# PostgreSQL later: add a second entry with `engine: postgresql`,
+# `schema: migrations/postgres`, the same `queries` directory (queries use
+# sqlc.arg()/sqlc.narg() so they carry no driver-specific placeholders) and
+# `out: ../internal/database/pggen`.

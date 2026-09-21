@@ -1,0 +1,18 @@
+# build output
+/bin/
+/dist/
+/web/dist/*
+!/web/dist/.gitkeep
+/web/node_modules/
+
+# local runtime data
+/data/
+*.db
+*.db-shm
+*.db-wal
+.env
+tracker.env
+
+# tooling
+.DS_Store
+*.log
