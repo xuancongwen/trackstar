@@ -473,6 +473,8 @@ runtime plus the pure-Go SQLite engine; the page cache is capped at 8 MB.
 | `database is locked` | Another process holds a long write lock (an open `sqlite3` shell?). Tracker waits 5 s. |
 | `attempt to write a readonly database` after running tools as root | Root created `-wal`/`-shm` files: `chown -R tracker:tracker /var/lib/tracker`. The scripts avoid this by running as `tracker`. |
 | Top-bar dot stays red / changes don't appear live | The stream is being cut: a proxy buffering or timing out `text/event-stream` (nginx: `proxy_buffering off; proxy_read_timeout 1h;` for `/api/*/events`). The board still refreshes on focus and every 5 min. |
+| `make dev`: "read session secret: permission denied" / UI loads but every API call is 502 | `./data` is owned by root because `docker compose` wrote to the same directory. `sudo chown -R $USER: data`, or `make dev DEV_DATA_DIR=./data-dev`. Since v0.2 `make dev` refuses to start in this state and stops both processes if either exits. |
+| `make dev`: "Port 5173 is in use" | Another Vite (possibly from an earlier `sudo make dev`) still owns the port: `fuser -k 5173/tcp` (or `sudo`), or `make dev DEV_PORT=5180`. |
 | Blank page: "built without the frontend" | The binary was built before `make frontend`; use `make build`. |
 | Iteration boundaries feel off by hours | Set `TRACKER_TIMEZONE` (e.g. `America/Los_Angeles`) and restart. |
 

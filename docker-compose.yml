@@ -6,6 +6,9 @@ services:
     ports:
       - "3000:3000"
     volumes:
+      # Created as root by the container. If you also develop in this checkout,
+      # `make dev` uses ./data too — point one of them elsewhere, or
+      # `sudo chown -R $USER: data` before `make dev`.
       - ./data:/var/lib/tracker
     environment:
       TRACKER_DATABASE_DRIVER: sqlite

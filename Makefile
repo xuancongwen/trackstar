@@ -6,11 +6,24 @@ PLATFORMS ?= linux/amd64 linux/arm64
 
 .PHONY: dev backend frontend build test e2e lint migrate release sqlc docker clean
 
+DEV_DATA_DIR ?= ./data
+DEV_PORT     ?= 5173
+DEV_API_PORT ?= 3000
+
 ## dev: API on :3000 and Vite (hot reload) on :5173 — open http://localhost:5173
+## Either process exiting stops the other, so a broken backend is an error, not a
+## silently 502-ing UI. Override DEV_DATA_DIR / DEV_PORT / DEV_API_PORT as needed.
 dev: web/node_modules
-	@trap 'kill 0' INT TERM EXIT; \
-	TRACKER_DATA_DIR=./data TRACKER_PUBLIC_URL=http://localhost:5173/ TRACKER_LOG_LEVEL=debug go run ./cmd/tracker & \
-	npm --prefix web run dev & \
+	@if [ -e "$(DEV_DATA_DIR)" ] && [ ! -w "$(DEV_DATA_DIR)" ]; then \
+		echo "error: $(DEV_DATA_DIR) is not writable by $$(id -un) (owned by $$(stat -c %U "$(DEV_DATA_DIR)" 2>/dev/null || stat -f %Su "$(DEV_DATA_DIR)"))."; \
+		echo "       docker compose uses the same ./data and its container runs as root. Fix with:"; \
+		echo "         sudo chown -R $$(id -un): $(DEV_DATA_DIR)      # or: make dev DEV_DATA_DIR=./data-dev"; \
+		exit 1; \
+	fi
+	@trap 'kill 0 2>/dev/null' INT TERM EXIT; \
+	( TRACKER_ADDR=127.0.0.1:$(DEV_API_PORT) TRACKER_DATA_DIR=$(DEV_DATA_DIR) TRACKER_PUBLIC_URL=http://localhost:$(DEV_PORT)/ TRACKER_LOG_LEVEL=debug \
+	    go run ./cmd/tracker; echo "backend exited; stopping"; kill 0 ) & \
+	( TRACKER_DEV_PORT=$(DEV_PORT) TRACKER_DEV_BACKEND=http://127.0.0.1:$(DEV_API_PORT) npm --prefix web run dev; echo "vite exited; stopping"; kill 0 ) & \
 	wait
 
 ## backend: compile the Go binary with whatever is in web/dist
