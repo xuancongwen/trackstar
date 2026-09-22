@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"tracker/internal/apperr"
-	"tracker/internal/database"
-	"tracker/internal/project"
-	"tracker/internal/story"
-	"tracker/internal/testutil"
+	"trackstar/internal/apperr"
+	"trackstar/internal/database"
+	"trackstar/internal/project"
+	"trackstar/internal/story"
+	"trackstar/internal/testutil"
 )
 
 type fixture struct {

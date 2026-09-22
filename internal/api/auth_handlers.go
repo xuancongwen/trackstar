@@ -4,12 +4,12 @@ import (
 	"net/http"
 	"time"
 
-	"tracker/internal/apperr"
-	"tracker/internal/auth"
-	"tracker/internal/user"
+	"trackstar/internal/apperr"
+	"trackstar/internal/auth"
+	"trackstar/internal/user"
 )
 
-const sessionCookie = "tracker_session"
+const sessionCookie = "trackstar_session"
 
 func sessionToken(r *http.Request) string {
 	c, err := r.Cookie(sessionCookie)
@@ -20,7 +20,7 @@ func sessionToken(r *http.Request) string {
 }
 
 // setSessionCookie writes (or, with an empty token, clears) the cookie. Secure
-// follows TRACKER_PUBLIC_URL rather than forwarded headers, so it is correct
+// follows TRACKSTAR_PUBLIC_URL rather than forwarded headers, so it is correct
 // behind a TLS-terminating proxy or tunnel without trusting client input.
 func (s *Server) setSessionCookie(w http.ResponseWriter, token string) {
 	c := &http.Cookie{

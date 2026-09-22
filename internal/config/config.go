@@ -40,7 +40,7 @@ type Config struct {
 // SecureCookies reports whether cookies must carry the Secure attribute.
 func (c *Config) SecureCookies() bool { return c.PublicURL.Scheme == "https" }
 
-// Load reads TRACKER_* variables through getenv (os.Getenv in production).
+// Load reads TRACKSTAR_* variables through getenv (os.Getenv in production).
 // Every problem is reported at once so a broken deployment fails loudly.
 func Load(getenv func(string) string) (*Config, error) {
 	var errs []error
@@ -52,43 +52,43 @@ func Load(getenv func(string) string) (*Config, error) {
 	}
 
 	c := &Config{
-		Addr:           get("TRACKER_ADDR", "127.0.0.1:3000"),
-		DataDir:        get("TRACKER_DATA_DIR", "./data"),
-		DatabaseDriver: get("TRACKER_DATABASE_DRIVER", DriverSQLite),
+		Addr:           get("TRACKSTAR_ADDR", "127.0.0.1:3000"),
+		DataDir:        get("TRACKSTAR_DATA_DIR", "./data"),
+		DatabaseDriver: get("TRACKSTAR_DATABASE_DRIVER", DriverSQLite),
 	}
 
 	if _, _, err := net.SplitHostPort(c.Addr); err != nil {
-		errs = append(errs, fmt.Errorf("TRACKER_ADDR %q: %w", c.Addr, err))
+		errs = append(errs, fmt.Errorf("TRACKSTAR_ADDR %q: %w", c.Addr, err))
 	}
 
 	switch c.DatabaseDriver {
 	case DriverSQLite:
-		c.DatabaseURL = get("TRACKER_DATABASE_URL", filepath.Join(c.DataDir, "tracker.db"))
+		c.DatabaseURL = get("TRACKSTAR_DATABASE_URL", filepath.Join(c.DataDir, "trackstar.db"))
 	case DriverPostgres:
-		errs = append(errs, errors.New("TRACKER_DATABASE_DRIVER=postgres is reserved but not implemented yet; use sqlite"))
+		errs = append(errs, errors.New("TRACKSTAR_DATABASE_DRIVER=postgres is reserved but not implemented yet; use sqlite"))
 	default:
-		errs = append(errs, fmt.Errorf("TRACKER_DATABASE_DRIVER %q: must be %q", c.DatabaseDriver, DriverSQLite))
+		errs = append(errs, fmt.Errorf("TRACKSTAR_DATABASE_DRIVER %q: must be %q", c.DatabaseDriver, DriverSQLite))
 	}
 
 	_, port, _ := net.SplitHostPort(c.Addr)
-	rawURL := get("TRACKER_PUBLIC_URL", "http://localhost:"+port+"/")
+	rawURL := get("TRACKSTAR_PUBLIC_URL", "http://localhost:"+port+"/")
 	if u, err := url.Parse(rawURL); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		errs = append(errs, fmt.Errorf("TRACKER_PUBLIC_URL %q: must be an absolute http(s) URL", rawURL))
+		errs = append(errs, fmt.Errorf("TRACKSTAR_PUBLIC_URL %q: must be an absolute http(s) URL", rawURL))
 	} else {
 		c.PublicURL = u
 	}
 
-	allow, err := strconv.ParseBool(get("TRACKER_ALLOW_REGISTRATION", "true"))
+	allow, err := strconv.ParseBool(get("TRACKSTAR_ALLOW_REGISTRATION", "true"))
 	if err != nil {
-		errs = append(errs, fmt.Errorf("TRACKER_ALLOW_REGISTRATION: %w", err))
+		errs = append(errs, fmt.Errorf("TRACKSTAR_ALLOW_REGISTRATION: %w", err))
 	}
 	c.AllowRegistration = allow
 
-	if err := c.LogLevel.UnmarshalText([]byte(get("TRACKER_LOG_LEVEL", "info"))); err != nil {
-		errs = append(errs, fmt.Errorf("TRACKER_LOG_LEVEL: %w", err))
+	if err := c.LogLevel.UnmarshalText([]byte(get("TRACKSTAR_LOG_LEVEL", "info"))); err != nil {
+		errs = append(errs, fmt.Errorf("TRACKSTAR_LOG_LEVEL: %w", err))
 	}
 
-	for _, part := range strings.Split(get("TRACKER_TRUSTED_PROXIES", "127.0.0.0/8,::1/128"), ",") {
+	for _, part := range strings.Split(get("TRACKSTAR_TRUSTED_PROXIES", "127.0.0.0/8,::1/128"), ",") {
 		part = strings.TrimSpace(part)
 		if part == "" || part == "none" {
 			continue
@@ -100,22 +100,22 @@ func Load(getenv func(string) string) (*Config, error) {
 			}
 		}
 		if err != nil {
-			errs = append(errs, fmt.Errorf("TRACKER_TRUSTED_PROXIES %q: %w", part, err))
+			errs = append(errs, fmt.Errorf("TRACKSTAR_TRUSTED_PROXIES %q: %w", part, err))
 			continue
 		}
 		c.TrustedProxies = append(c.TrustedProxies, prefix.Masked())
 	}
 
-	tz := get("TRACKER_TIMEZONE", "UTC")
+	tz := get("TRACKSTAR_TIMEZONE", "UTC")
 	if loc, err := time.LoadLocation(tz); err != nil {
-		errs = append(errs, fmt.Errorf("TRACKER_TIMEZONE %q: %w", tz, err))
+		errs = append(errs, fmt.Errorf("TRACKSTAR_TIMEZONE %q: %w", tz, err))
 	} else {
 		c.Location = loc
 	}
 
-	if secret := get("TRACKER_SESSION_SECRET", ""); secret != "" {
+	if secret := get("TRACKSTAR_SESSION_SECRET", ""); secret != "" {
 		if len(secret) < minSecretLength {
-			errs = append(errs, fmt.Errorf("TRACKER_SESSION_SECRET: must be at least %d characters", minSecretLength))
+			errs = append(errs, fmt.Errorf("TRACKSTAR_SESSION_SECRET: must be at least %d characters", minSecretLength))
 		}
 		c.SessionSecret = []byte(secret)
 	}

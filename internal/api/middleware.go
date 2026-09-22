@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"tracker/internal/user"
+	"trackstar/internal/user"
 )
 
 type ctxKey int

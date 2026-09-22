@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"tracker/internal/story"
+	"trackstar/internal/story"
 )
 
 func (s *Server) handleListStories(w http.ResponseWriter, r *http.Request) {

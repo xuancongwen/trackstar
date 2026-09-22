@@ -28,7 +28,7 @@ export class ApiError extends Error {
 export const CLIENT_ID = Math.random().toString(36).slice(2, 12)
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { 'X-Tracker-Client': CLIENT_ID }
+  const headers: Record<string, string> = { 'X-Trackstar-Client': CLIENT_ID }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   const res = await fetch(path, {
     method,

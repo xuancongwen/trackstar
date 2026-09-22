@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Install Tracker inside an existing Debian/Ubuntu LXC (Proxmox or otherwise).
+# Install Trackstar inside an existing Debian/Ubuntu LXC (Proxmox or otherwise).
 #
 # Run this *inside* the container, as root, after you have created it, given it
-# a network and updated it. It checks the container for what Tracker needs,
+# a network and updated it. It checks the container for what Trackstar needs,
 # installs the few required packages and then runs the normal scripts/setup.sh
 # with any options you pass through:
 #
@@ -97,10 +97,10 @@ log "Container: ${PRETTY_NAME}, ${privileged}, ${cores} core(s), RAM $(human "$m
 log "Sandbox:   $nesting"
 
 if [ "$mem_max" != max ] && [ "$mem_max" -lt $((200 * 1024 * 1024)) ]; then
-  warn "less than 200 MB of RAM: Tracker itself needs ~50 MB, but apt upgrades may fail; 256–512 MB is recommended"
+  warn "less than 200 MB of RAM: Trackstar itself needs ~50 MB, but apt upgrades may fail; 256–512 MB is recommended"
 fi
 if [ "$privileged" = privileged ]; then
-  warn "privileged container: Tracker does not need it; an unprivileged container is the safer default"
+  warn "privileged container: Trackstar does not need it; an unprivileged container is the safer default"
 fi
 [ -n "$ip_addr" ] || warn "no IPv4 address on this container yet; the printed URL will be a placeholder"
 if ! getent hosts deb.debian.org >/dev/null 2>&1 && ! getent hosts archive.ubuntu.com >/dev/null 2>&1; then
@@ -120,7 +120,7 @@ fi
 # a bare template may lack for the checks above and for day-to-day operation.
 apt-get install -y -qq --no-install-recommends ca-certificates curl tar util-linux procps >/dev/null
 
-# A persistent journal so `journalctl -u tracker` survives a container restart.
+# A persistent journal so `journalctl -u trackstar` survives a container restart.
 if [ ! -d /var/log/journal ]; then
   mkdir -p /var/log/journal
   systemd-tmpfiles --create --prefix /var/log/journal >/dev/null 2>&1 || true
@@ -134,28 +134,28 @@ bash "$SCRIPT_DIR/setup.sh" "${PASSTHRU[@]+"${PASSTHRU[@]}"}"
 
 # --- 5. container-specific status ----------------------------------------------------
 
-env_file=/etc/tracker/tracker.env
+env_file=/etc/trackstar/trackstar.env
 get_env() { sed -n "s/^$1=//p" "$env_file" 2>/dev/null | tail -n1; }
-addr=$(get_env TRACKER_ADDR); port=${addr##*:}
-status=$(systemctl is-active tracker 2>/dev/null || true)
-dropin=/etc/systemd/system/tracker.service.d/10-no-namespaces.conf
+addr=$(get_env TRACKSTAR_ADDR); port=${addr##*:}
+status=$(systemctl is-active trackstar 2>/dev/null || true)
+dropin=/etc/systemd/system/trackstar.service.d/10-no-namespaces.conf
 
 cat <<DONE
 
-Tracker is installed in this container.
+Trackstar is installed in this container.
 
   Hostname:     $(hostname)
   IP address:   ${ip_addr:-<none yet>}
   Local URL:    http://${ip_addr:-<container-ip>}:${port:-3000}/
-  Public URL:   $(get_env TRACKER_PUBLIC_URL)
+  Public URL:   $(get_env TRACKSTAR_PUBLIC_URL)
   Service:      ${status:-unknown}$([ -f "$dropin" ] && echo "  (relaxed systemd sandbox: $dropin)")
   Memory now:   $(awk '/MemTotal/ {t=$2} /MemAvailable/ {a=$2} END {printf "%d MB used of %d MB", (t-a)/1024, t/1024}' /proc/meminfo)
 
 Next steps:
   * point your reverse proxy / Cloudflare Tunnel at http://${ip_addr:-<container-ip>}:${port:-3000}
-    (see /opt/tracker/deploy/cloudflared-example.md)
+    (see /opt/trackstar/deploy/cloudflared-example.md)
   * open the public URL and register; the first account becomes the administrator
-  * then set TRACKER_ALLOW_REGISTRATION=false in $env_file and: systemctl restart tracker
-  * later: /opt/tracker/scripts/update.sh, backup.sh, restore.sh
+  * then set TRACKSTAR_ALLOW_REGISTRATION=false in $env_file and: systemctl restart trackstar
+  * later: /opt/trackstar/scripts/update.sh, backup.sh, restore.sh
 DONE
-[ "$status" = active ] || die "the tracker service is not active; see: journalctl -u tracker -n 50"
+[ "$status" = active ] || die "the trackstar service is not active; see: journalctl -u trackstar -n 50"

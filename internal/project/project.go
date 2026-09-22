@@ -9,10 +9,10 @@ import (
 	"time"
 	"unicode"
 
-	"tracker/internal/apperr"
-	"tracker/internal/database"
-	"tracker/internal/database/dbgen"
-	"tracker/internal/iteration"
+	"trackstar/internal/apperr"
+	"trackstar/internal/database"
+	"trackstar/internal/database/dbgen"
+	"trackstar/internal/iteration"
 )
 
 const (

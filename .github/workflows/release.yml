@@ -24,7 +24,7 @@ jobs:
       - run: npm --prefix web ci
       - run: go test ./... && npm --prefix web test
 
-      # dist/tracker-<tag>-linux-{amd64,arm64}.tar.gz + SHA256SUMS — exactly
+      # dist/trackstar-<tag>-linux-{amd64,arm64}.tar.gz + SHA256SUMS — exactly
       # what setup.sh --repo and update.sh look for.
       - run: make release VERSION=${{ github.ref_name }}
 

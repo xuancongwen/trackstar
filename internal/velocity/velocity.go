@@ -8,12 +8,12 @@ import (
 	"database/sql"
 	"time"
 
-	"tracker/internal/apperr"
-	"tracker/internal/database"
-	"tracker/internal/database/dbgen"
-	"tracker/internal/iteration"
-	"tracker/internal/project"
-	"tracker/internal/story"
+	"trackstar/internal/apperr"
+	"trackstar/internal/database"
+	"trackstar/internal/database/dbgen"
+	"trackstar/internal/iteration"
+	"trackstar/internal/project"
+	"trackstar/internal/story"
 )
 
 // DefaultVelocity is assumed until a project has completed an iteration, so

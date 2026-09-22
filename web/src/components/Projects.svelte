@@ -33,7 +33,7 @@
 </script>
 
 <header>
-  <strong>Tracker</strong>
+  <strong>Trackstar</strong>
   <span class="spacer"></span>
   <span class="muted">{user.display_name}</span>
   <button onclick={onlogout}>Sign out</button>

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"tracker/internal/apperr"
-	"tracker/internal/database"
+	"trackstar/internal/apperr"
+	"trackstar/internal/database"
 )
 
 func ptr[T any](v T) *T { return &v }

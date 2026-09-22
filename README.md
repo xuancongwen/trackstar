@@ -1,4 +1,4 @@
-# Tracker
+# Trackstar
 
 A lightweight, self-hosted project tracker in the spirit of Pivotal Tracker:
 Icebox → Backlog → Current iteration, points, velocity, and a keyboard-friendly
@@ -89,12 +89,12 @@ SQLite (WAL)                                              ◀── db/migration
 ```
 
 ```
-cmd/tracker/          main: serve | migrate | backup | check | reset-password | healthcheck | version
+cmd/trackstar/          main: serve | migrate | backup | check | reset-password | healthcheck | version
 .github/workflows/    ci.yml (lint, generated-code check, tests, e2e, Docker probe), release.yml (tagged releases)
 internal/api/         handlers, middleware (request id, logging, origin check, trusted proxies), SSE stream
 internal/events/      in-process change hub: Publish(project) → every open stream of that project
 internal/auth/        bcrypt passwords, server-side sessions (HMAC-hashed tokens), login rate limit
-internal/config/      TRACKER_* environment → validated Config
+internal/config/      TRACKSTAR_* environment → validated Config
 internal/database/    Open/Migrate/InTx/Backup; sqlite.go is the only driver-specific file
 internal/story/       stories, workflow (states.go), ordering (position.go), comments, labels, search
 internal/project/     projects and their iteration settings
@@ -109,7 +109,7 @@ Design decisions worth knowing:
 
 - **Iterations are computed, not stored.** Iteration 1 starts on the project's
   start weekday on or before its creation date; iteration *n* follows by
-  calendar arithmetic (DST-safe) in `TRACKER_TIMEZONE`. History is derived from
+  calendar arithmetic (DST-safe) in `TRACKSTAR_TIMEZONE`. History is derived from
   each story's `accepted_at`.
 - **Ordering** uses sparse integer positions (gap 65 536, midpoint insertion),
   independently per panel. A drag rewrites exactly one row; when a gap is used
@@ -141,7 +141,7 @@ Design decisions worth knowing:
 Requirements: Go ≥ 1.26, Node ≥ 20. No Docker, no database server.
 
 ```sh
-git clone <this repository> tracker && cd tracker
+git clone <this repository> trackstar && cd trackstar
 make dev        # API on :3000 + Vite with hot reload on :5173
 ```
 
@@ -152,10 +152,10 @@ clashes).
 
 ```sh
 make test       # go test ./...  +  vitest
-make e2e        # headless-Chromium end-to-end tests against bin/tracker (web/e2e/*.mjs)
+make e2e        # headless-Chromium end-to-end tests against bin/trackstar (web/e2e/*.mjs)
 make lint       # go vet, gofmt, svelte-check, shellcheck
 make sqlc       # regenerate internal/database/dbgen after editing db/queries or migrations
-make migrate    # apply migrations to ./data/tracker.db without starting the server
+make migrate    # apply migrations to ./data/trackstar.db without starting the server
 ```
 
 Tests use temporary SQLite databases (`database.NewTestDB`) and cover
@@ -170,7 +170,7 @@ search, trash/undo, the account dialog, and — with two browsers — live sync.
 CI (`.github/workflows/ci.yml`) runs all of that plus a check that
 `internal/database/dbgen` matches `db/queries`, and builds the Docker image
 and probes `/health`. Pushing a tag `v*` runs `release.yml`, which publishes
-`tracker-<tag>-linux-{amd64,arm64}.tar.gz` and `SHA256SUMS` as a GitHub
+`trackstar-<tag>-linux-{amd64,arm64}.tar.gz` and `SHA256SUMS` as a GitHub
 release — the layout `setup.sh --repo` and `update.sh` expect.
 
 Adding a migration: create `db/migrations/sqlite/0000N_name.sql` (goose
@@ -179,18 +179,18 @@ format), run `make sqlc`. Migrations are embedded and applied at startup.
 ## Production build
 
 ```sh
-make build      # → bin/tracker   (frontend embedded, static, CGO disabled)
-make release    # → dist/tracker-<version>-linux-{amd64,arm64}.tar.gz + SHA256SUMS
+make build      # → bin/trackstar   (frontend embedded, static, CGO disabled)
+make release    # → dist/trackstar-<version>-linux-{amd64,arm64}.tar.gz + SHA256SUMS
 ```
 
-A release archive contains `tracker`, `scripts/`, `deploy/` and this README.
+A release archive contains `trackstar`, `scripts/`, `deploy/` and this README.
 The installed layout is:
 
 ```
-/usr/local/bin/tracker          the application (tracker.previous = rollback copy)
-/etc/tracker/tracker.env        configuration (root:tracker 0640)
-/var/lib/tracker/tracker.db     data (+ -wal/-shm, backups/, session_secret)
-/opt/tracker/scripts/           update.sh, backup.sh, restore.sh, …
+/usr/local/bin/trackstar          the application (trackstar.previous = rollback copy)
+/etc/trackstar/trackstar.env        configuration (root:trackstar 0640)
+/var/lib/trackstar/trackstar.db     data (+ -wal/-shm, backups/, session_secret)
+/opt/trackstar/scripts/           update.sh, backup.sh, restore.sh, …
 ```
 
 The binary serves the frontend on `/`, the API on `/api/*` and `GET /health`
@@ -199,20 +199,20 @@ The binary serves the frontend on `/`, the API on `/api/*` and `GET /health`
 ## Configuration
 
 Environment only; invalid values abort startup with a list of every problem.
-See [`deploy/tracker.env.example`](deploy/tracker.env.example).
+See [`deploy/trackstar.env.example`](deploy/trackstar.env.example).
 
 | Variable | Default | |
 |---|---|---|
-| `TRACKER_ADDR` | `127.0.0.1:3000` | listen address |
-| `TRACKER_DATA_DIR` | `./data` | created if missing |
-| `TRACKER_DATABASE_DRIVER` | `sqlite` | `postgres` is reserved |
-| `TRACKER_DATABASE_URL` | `$DATA_DIR/tracker.db` | |
-| `TRACKER_PUBLIC_URL` | `http://localhost:<port>/` | decides Secure cookies and the allowed `Origin` |
-| `TRACKER_ALLOW_REGISTRATION` | `true` | the first account can always be created |
-| `TRACKER_SESSION_SECRET` | generated into `$DATA_DIR/session_secret` | ≥ 32 chars |
-| `TRACKER_LOG_LEVEL` | `info` | `debug` also logs `/health` |
-| `TRACKER_TIMEZONE` | `UTC` | where iteration days begin (tzdata is embedded) |
-| `TRACKER_TRUSTED_PROXIES` | `127.0.0.0/8,::1/128` | whose forwarding headers are believed |
+| `TRACKSTAR_ADDR` | `127.0.0.1:3000` | listen address |
+| `TRACKSTAR_DATA_DIR` | `./data` | created if missing |
+| `TRACKSTAR_DATABASE_DRIVER` | `sqlite` | `postgres` is reserved |
+| `TRACKSTAR_DATABASE_URL` | `$DATA_DIR/trackstar.db` | |
+| `TRACKSTAR_PUBLIC_URL` | `http://localhost:<port>/` | decides Secure cookies and the allowed `Origin` |
+| `TRACKSTAR_ALLOW_REGISTRATION` | `true` | the first account can always be created |
+| `TRACKSTAR_SESSION_SECRET` | generated into `$DATA_DIR/session_secret` | ≥ 32 chars |
+| `TRACKSTAR_LOG_LEVEL` | `info` | `debug` also logs `/health` |
+| `TRACKSTAR_TIMEZONE` | `UTC` | where iteration days begin (tzdata is embedded) |
+| `TRACKSTAR_TRUSTED_PROXIES` | `127.0.0.0/8,::1/128` | whose forwarding headers are believed |
 
 Logs are JSON lines on stdout (journald under systemd): `time`, `level`,
 `method`, `path`, `status`, `duration_ms`, `request_id`, `remote_ip`.
@@ -230,8 +230,8 @@ and size, uptime, memory, open live streams, and two ordering health numbers:
   Transactions begin `IMMEDIATE`, so read-modify-write transactions (moves)
   queue instead of failing on lock upgrade.
 - Migrations run automatically at startup (goose, embedded SQL).
-- Backups use `VACUUM INTO` (`tracker backup <file>`), which is safe while the
-  server is writing. Never copy a live `tracker.db` without its `-wal`.
+- Backups use `VACUUM INTO` (`trackstar backup <file>`), which is safe while the
+  server is writing. Never copy a live `trackstar.db` without its `-wal`.
 
 ## Future PostgreSQL migration
 
@@ -262,8 +262,8 @@ To add PostgreSQL:
 Services, handlers, tests and the frontend do not change:
 
 ```
-TRACKER_DATABASE_DRIVER=postgres
-TRACKER_DATABASE_URL=postgres://tracker:…@db/tracker
+TRACKSTAR_DATABASE_DRIVER=postgres
+TRACKSTAR_DATABASE_URL=postgres://trackstar:…@db/trackstar
 ```
 
 Data moves by exporting each table in id order and importing it (same column
@@ -275,13 +275,13 @@ A 512 MB droplet is plenty. On your workstation:
 
 ```sh
 make release
-scp dist/tracker-*-linux-amd64.tar.gz root@droplet:
+scp dist/trackstar-*-linux-amd64.tar.gz root@droplet:
 ```
 
 On the server:
 
 ```sh
-tar xzf tracker-*-linux-amd64.tar.gz && cd tracker-*-linux-amd64
+tar xzf trackstar-*-linux-amd64.tar.gz && cd trackstar-*-linux-amd64
 sudo ./scripts/setup.sh --public-url https://track.example.com/ --port 3000
 ```
 
@@ -289,8 +289,8 @@ Or do both in one step from your checkout (first run installs, later runs
 deploy): `./scripts/deploy.sh root@droplet -- --public-url https://track.example.com/`
 
 `setup.sh` validates the distribution, installs `ca-certificates curl tar`,
-creates the `tracker` user, `/etc/tracker`, `/var/lib/tracker`, installs the
-binary, writes `tracker.env` (generating a session secret), installs and
+creates the `trackstar` user, `/etc/trackstar`, `/var/lib/trackstar`, installs the
+binary, writes `trackstar.env` (generating a session secret), installs and
 enables the hardened systemd unit, starts it and waits for `/health`. It is
 idempotent: re-running keeps configuration, secret and data, and only changes
 options you pass explicitly. Other sources for the binary: `--binary PATH`,
@@ -298,20 +298,20 @@ options you pass explicitly. Other sources for the binary: `--binary PATH`,
 repo is remembered for `update.sh`).
 
 Put TLS in front of it: a Cloudflare Tunnel (below), or Caddy/nginx on the same
-machine with `TRACKER_ADDR=127.0.0.1:3000`. After creating your accounts set
-`TRACKER_ALLOW_REGISTRATION=false` and `systemctl restart tracker`.
+machine with `TRACKSTAR_ADDR=127.0.0.1:3000`. After creating your accounts set
+`TRACKSTAR_ALLOW_REGISTRATION=false` and `systemctl restart trackstar`.
 
 ## Proxmox LXC installation
 
-Create the container yourself in the Proxmox UI or with `pct`; Tracker does not
+Create the container yourself in the Proxmox UI or with `pct`; Trackstar does not
 need anything unusual. Recommended (floor in brackets):
 
 | | | Why |
 |---|---|---|
 | Template | Debian 13 standard (Ubuntu also works) | `setup.sh` supports Debian/Ubuntu |
-| Type | **unprivileged** | Tracker runs as the `tracker` user without capabilities |
+| Type | **unprivileged** | Trackstar runs as the `trackstar` user without capabilities |
 | Cores | 1 | idle CPU is ~0; a request is ~1 ms |
-| RAM | **512 MB** (256) | tracker uses 15–50 MB; the rest is Debian + headroom for `apt upgrade` |
+| RAM | **512 MB** (256) | trackstar uses 15–50 MB; the rest is Debian + headroom for `apt upgrade` |
 | Swap | 512 MB (256) | safety net for upgrade spikes; unused in normal operation |
 | Disk | 8 GB (4) | template ≈ 0.5 GB, the database is a few MB, backups are the size of the database |
 | Features | none | **nesting is not required** — see below |
@@ -341,8 +341,8 @@ workstation: `./scripts/deploy.sh root@<container-ip> -- --public-url https://tr
 `PrivateTmp=`, …) is unavailable in an unprivileged container without the
 *nesting* feature, so `setup.sh` probes for it with `systemd-run` and, only if
 the probe fails, installs
-`/etc/systemd/system/tracker.service.d/10-no-namespaces.conf`, which turns off
-just those directives. The service still runs as the unprivileged `tracker`
+`/etc/systemd/system/trackstar.service.d/10-no-namespaces.conf`, which turns off
+just those directives. The service still runs as the unprivileged `trackstar`
 user with no capabilities, inside an unprivileged container. If you prefer the
 full sandbox, enable nesting on the container and re-run `setup.sh`; it removes
 the drop-in when the probe succeeds.
@@ -356,60 +356,60 @@ docker compose up -d --build      # or: make docker && docker compose up -d
 ```
 
 Data is in `./data`. The image is `distroless/static` plus the binary (no
-shell); the health check is `tracker healthcheck`. It runs as root by default
+shell); the health check is `trackstar healthcheck`. It runs as root by default
 so the bind mount works regardless of ownership; to drop root,
 `chown 65532:65532 data` and uncomment `user:` in `docker-compose.yml`.
-Backup: `docker compose exec tracker tracker backup /var/lib/tracker/backup-$(date +%F).db`.
+Backup: `docker compose exec trackstar trackstar backup /var/lib/trackstar/backup-$(date +%F).db`.
 
 ## Cloudflare Tunnel
 
 ```
 Public hostname:  track.example.com
 Origin service:   http://192.168.1.240:3000
-Tracker:          TRACKER_PUBLIC_URL=https://track.example.com/
+Trackstar:          TRACKSTAR_PUBLIC_URL=https://track.example.com/
 ```
 
-Tracker does not read `X-Forwarded-Proto`/`-Host` at all: cookie security and
-the CSRF origin check derive from `TRACKER_PUBLIC_URL`. `CF-Connecting-IP` and
+Trackstar does not read `X-Forwarded-Proto`/`-Host` at all: cookie security and
+the CSRF origin check derive from `TRACKSTAR_PUBLIC_URL`. `CF-Connecting-IP` and
 `X-Forwarded-For` are used only for the logged client IP and the login rate
-limiter, and only when the TCP peer is listed in `TRACKER_TRUSTED_PROXIES` —
+limiter, and only when the TCP peer is listed in `TRACKSTAR_TRUSTED_PROXIES` —
 direct clients cannot spoof them. If cloudflared runs on another machine, add
 its address. Full walkthrough: [`deploy/cloudflared-example.md`](deploy/cloudflared-example.md).
 
 ## Backups and restore
 
 ```sh
-sudo /opt/tracker/scripts/backup.sh                  # → /var/backups/tracker/tracker-backup-YYYY-MM-DD-HHMMSS.tar.gz
-sudo /opt/tracker/scripts/backup.sh --output-dir /mnt/nas/tracker --keep 14
-sudo /opt/tracker/scripts/restore.sh /var/backups/tracker/tracker-backup-….tar.gz
+sudo /opt/trackstar/scripts/backup.sh                  # → /var/backups/trackstar/trackstar-backup-YYYY-MM-DD-HHMMSS.tar.gz
+sudo /opt/trackstar/scripts/backup.sh --output-dir /mnt/nas/trackstar --keep 14
+sudo /opt/trackstar/scripts/restore.sh /var/backups/trackstar/trackstar-backup-….tar.gz
 ```
 
-The archive holds a consistent `tracker.db` (taken online with `VACUUM INTO`
-and verified with `PRAGMA integrity_check`), `tracker.env` with the session
+The archive holds a consistent `trackstar.db` (taken online with `VACUUM INTO`
+and verified with `PRAGMA integrity_check`), `trackstar.env` with the session
 secret blanked, a `MANIFEST`, and `uploads/` should that directory ever exist.
 `--include-secrets` keeps the secret (restore with `--with-config` to bring the
 configuration back too); without it a restore simply signs everyone out.
 
 `restore.sh` validates the archive *before* touching anything, stops the
-service, moves the current data to `/var/lib/tracker/pre-restore-<timestamp>/`,
+service, moves the current data to `/var/lib/trackstar/pre-restore-<timestamp>/`,
 restores, fixes ownership, starts the service and checks `/health` — and puts
 the previous data back if the restored service is unhealthy.
 
-Nightly cron: `15 3 * * * /opt/tracker/scripts/backup.sh --keep 14 >/dev/null`
+Nightly cron: `15 3 * * * /opt/trackstar/scripts/backup.sh --keep 14 >/dev/null`
 
 ## Updates and deploys
 
 On the host:
 
 ```sh
-sudo /opt/tracker/scripts/update.sh                              # latest GitHub release (needs TRACKER_REPO, see setup.sh --repo)
-sudo /opt/tracker/scripts/update.sh --version v0.2.0
-sudo /opt/tracker/scripts/update.sh --file tracker-v0.2.0-linux-amd64.tar.gz
+sudo /opt/trackstar/scripts/update.sh                              # latest GitHub release (needs TRACKSTAR_REPO, see setup.sh --repo)
+sudo /opt/trackstar/scripts/update.sh --version v0.2.0
+sudo /opt/trackstar/scripts/update.sh --file trackstar-v0.2.0-linux-amd64.tar.gz
 ```
 
 It verifies the download (SHA256SUMS when published, and that the binary runs
 on this machine), snapshots the database, keeps the old binary as
-`tracker.previous`, swaps atomically, restarts, polls `/health` for 30 s, and
+`trackstar.previous`, swaps atomically, restarts, polls `/health` for 30 s, and
 on failure restores both the binary and the pre-update snapshot (an older
 binary must not meet a newer schema).
 
@@ -417,7 +417,7 @@ From your workstation: `./scripts/deploy.sh root@192.168.1.240` builds the
 frontend and a Linux binary for the remote architecture, uploads it, snapshots
 the database, stops the service, swaps the binary atomically, starts (migrating
 on startup), verifies `/health`, and rolls back on failure. It never touches
-`/etc/tracker/tracker.env`. Non-root SSH users need passwordless sudo.
+`/etc/trackstar/trackstar.env`. Non-root SSH users need passwordless sudo.
 
 ## API
 
@@ -479,22 +479,22 @@ runtime plus the pure-Go SQLite engine; the page cache is capped at 8 MB.
 
 | Symptom | Cause / fix |
 |---|---|
-| Exits at once with `invalid configuration:` | Every bad `TRACKER_*` value is listed; fix `/etc/tracker/tracker.env`. `journalctl -u tracker -n 50` |
+| Exits at once with `invalid configuration:` | Every bad `TRACKSTAR_*` value is listed; fix `/etc/trackstar/trackstar.env`. `journalctl -u trackstar -n 50` |
 | `status=226/NAMESPACE` in an LXC | Sandbox needs mount namespaces. Re-run `setup.sh` (installs the drop-in) or enable nesting. |
-| Login "works" but you are signed out immediately | `TRACKER_PUBLIC_URL` is `https://…` but you browse over plain `http://` — Secure cookies are not stored. Use the public URL, or set an `http://` URL for LAN-only installs. |
-| `403 cross-origin request rejected` | The page's origin is neither `TRACKER_PUBLIC_URL` nor the request's Host. Fix the public URL; make your reverse proxy pass `Host` through. |
-| Every request logs the proxy's IP | Add the proxy to `TRACKER_TRUSTED_PROXIES`. |
+| Login "works" but you are signed out immediately | `TRACKSTAR_PUBLIC_URL` is `https://…` but you browse over plain `http://` — Secure cookies are not stored. Use the public URL, or set an `http://` URL for LAN-only installs. |
+| `403 cross-origin request rejected` | The page's origin is neither `TRACKSTAR_PUBLIC_URL` nor the request's Host. Fix the public URL; make your reverse proxy pass `Host` through. |
+| Every request logs the proxy's IP | Add the proxy to `TRACKSTAR_TRUSTED_PROXIES`. |
 | `429` on login | 20 attempts per 5 minutes per client IP; wait, or restart the service. |
 | "this account has been deactivated" | An administrator deactivated the account; another admin can reactivate it under *Users*. |
-| Forgotten password | On the server: `sudo -u tracker sh -c 'set -a; . /etc/tracker/tracker.env; exec tracker reset-password you@example.com'` (reads the new password from stdin, revokes sessions). |
-| "registration is disabled" | `TRACKER_ALLOW_REGISTRATION=false` and an account exists. Enable it briefly to add a teammate. |
-| `database is locked` | Another process holds a long write lock (an open `sqlite3` shell?). Tracker waits 5 s. |
-| `attempt to write a readonly database` after running tools as root | Root created `-wal`/`-shm` files: `chown -R tracker:tracker /var/lib/tracker`. The scripts avoid this by running as `tracker`. |
+| Forgotten password | On the server: `sudo -u trackstar sh -c 'set -a; . /etc/trackstar/trackstar.env; exec trackstar reset-password you@example.com'` (reads the new password from stdin, revokes sessions). |
+| "registration is disabled" | `TRACKSTAR_ALLOW_REGISTRATION=false` and an account exists. Enable it briefly to add a teammate. |
+| `database is locked` | Another process holds a long write lock (an open `sqlite3` shell?). Trackstar waits 5 s. |
+| `attempt to write a readonly database` after running tools as root | Root created `-wal`/`-shm` files: `chown -R trackstar:trackstar /var/lib/trackstar`. The scripts avoid this by running as `trackstar`. |
 | Top-bar dot stays red / changes don't appear live | The stream is being cut: a proxy buffering or timing out `text/event-stream` (nginx: `proxy_buffering off; proxy_read_timeout 1h;` for `/api/*/events`). The board still refreshes on focus and every 5 min. |
 | `make dev`: "./data-dev is not writable" | Something else (e.g. a container) owns that directory. `sudo chown -R $USER: data-dev`, or `make dev DEV_DATA_DIR=<other dir>`. `make dev` refuses to start in this state and stops both processes if either exits. |
 | `make dev`: "Port 5173 is in use" | Another Vite (possibly from an earlier `sudo make dev`) still owns the port: `fuser -k 5173/tcp` (or `sudo`), or `make dev DEV_PORT=5180`. |
 | Blank page: "built without the frontend" | The binary was built before `make frontend`; use `make build`. |
-| Iteration boundaries feel off by hours | Set `TRACKER_TIMEZONE` (e.g. `America/Los_Angeles`) and restart. |
+| Iteration boundaries feel off by hours | Set `TRACKSTAR_TIMEZONE` (e.g. `America/Los_Angeles`) and restart. |
 
 ## Known limitations
 

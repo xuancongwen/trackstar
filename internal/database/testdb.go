@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"tracker/internal/config"
+	"trackstar/internal/config"
 )
 
 // NewTestDB returns a migrated temporary SQLite database that is removed

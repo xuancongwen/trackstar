@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"tracker/internal/apperr"
-	"tracker/internal/database"
-	"tracker/internal/database/dbgen"
+	"trackstar/internal/apperr"
+	"trackstar/internal/database"
+	"trackstar/internal/database/dbgen"
 )
 
 func ptr[T any](v T) *T { return &v }

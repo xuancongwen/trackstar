@@ -1,11 +1,11 @@
-# Tracker behind a Cloudflare Tunnel
+# Trackstar behind a Cloudflare Tunnel
 
 A tunnel gives you HTTPS on a public hostname without opening any inbound
-port. `cloudflared` dials out to Cloudflare and forwards requests to Tracker
+port. `cloudflared` dials out to Cloudflare and forwards requests to Trackstar
 over plain HTTP on your LAN (or loopback).
 
 ```
-browser ──https──▶ Cloudflare ══tunnel══▶ cloudflared ──http──▶ tracker :3000
+browser ──https──▶ Cloudflare ══tunnel══▶ cloudflared ──http──▶ trackstar :3000
 ```
 
 ## 1. Tunnel configuration
@@ -29,27 +29,27 @@ ingress:
   - service: http_status:404
 ```
 
-## 2. Tracker configuration (`/etc/tracker/tracker.env`)
+## 2. Trackstar configuration (`/etc/trackstar/trackstar.env`)
 
 ```ini
-TRACKER_ADDR=0.0.0.0:3000
-TRACKER_PUBLIC_URL=https://track.example.com/
+TRACKSTAR_ADDR=0.0.0.0:3000
+TRACKSTAR_PUBLIC_URL=https://track.example.com/
 
-# Address of the machine that runs cloudflared, as Tracker sees it.
-# Same machine  → keep the default (loopback) and prefer TRACKER_ADDR=127.0.0.1:3000
+# Address of the machine that runs cloudflared, as Trackstar sees it.
+# Same machine  → keep the default (loopback) and prefer TRACKSTAR_ADDR=127.0.0.1:3000
 # Other machine → its LAN address:
-TRACKER_TRUSTED_PROXIES=127.0.0.0/8,::1/128,192.168.1.10/32
+TRACKSTAR_TRUSTED_PROXIES=127.0.0.0/8,::1/128,192.168.1.10/32
 ```
 
-`sudo systemctl restart tracker` afterwards.
+`sudo systemctl restart trackstar` afterwards.
 
-## What `TRACKER_PUBLIC_URL` does
+## What `TRACKSTAR_PUBLIC_URL` does
 
-Tracker never looks at `X-Forwarded-Proto` or `X-Forwarded-Host`. Everything
-that depends on the external URL is derived from `TRACKER_PUBLIC_URL`:
+Trackstar never looks at `X-Forwarded-Proto` or `X-Forwarded-Host`. Everything
+that depends on the external URL is derived from `TRACKSTAR_PUBLIC_URL`:
 
 * `https://…` ⇒ the session cookie gets the `Secure` attribute, even though
-  the last hop (cloudflared → Tracker) is plain HTTP.
+  the last hop (cloudflared → Trackstar) is plain HTTP.
 * State-changing requests whose `Origin` header is neither the public URL nor
   the `Host` they were sent to are rejected (CSRF protection). Opening the
   app directly via `http://192.168.1.240:3000` keeps working for that reason —
@@ -61,7 +61,7 @@ that depends on the external URL is derived from `TRACKER_PUBLIC_URL`:
 Forwarding headers are only used for one thing: the client IP in logs and in
 the login rate limiter.
 
-* If the TCP peer is **not** in `TRACKER_TRUSTED_PROXIES`, `CF-Connecting-IP`
+* If the TCP peer is **not** in `TRACKSTAR_TRUSTED_PROXIES`, `CF-Connecting-IP`
   and `X-Forwarded-For` are ignored entirely — an internet client talking to
   the port directly cannot spoof its address.
 * If the peer **is** trusted, `CF-Connecting-IP` wins; otherwise
@@ -76,9 +76,9 @@ limit is shared by everyone coming through the tunnel.
 
 The board keeps one Server-Sent Events stream open per tab
 (`/api/projects/:id/events`). Cloudflare passes streaming responses through
-and closes streams that are idle for 100 s; Tracker sends a heartbeat every
+and closes streams that are idle for 100 s; Trackstar sends a heartbeat every
 30 s, so no tunnel configuration is needed. If you put nginx between
-cloudflared and Tracker, disable buffering for that path:
+cloudflared and Trackstar, disable buffering for that path:
 
 ```nginx
 location ~ ^/api/projects/[^/]+/events$ {
@@ -92,5 +92,5 @@ location ~ ^/api/projects/[^/]+/events$ {
 
 * When the tunnel is the only entrance, bind to loopback or firewall port 3000
   so the LAN cannot bypass Cloudflare (`ufw allow from 192.168.1.10 to any port 3000`).
-* Set `TRACKER_ALLOW_REGISTRATION=false` once your accounts exist, or put a
+* Set `TRACKSTAR_ALLOW_REGISTRATION=false` once your accounts exist, or put a
   Cloudflare Access policy in front of the hostname.

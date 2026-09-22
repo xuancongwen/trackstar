@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Update an installed Tracker, with automatic rollback.
+# Update an installed Trackstar, with automatic rollback.
 #
-#   sudo /opt/tracker/scripts/update.sh                       # latest release of the configured repo
-#   sudo /opt/tracker/scripts/update.sh --version v0.2.0
-#   sudo /opt/tracker/scripts/update.sh --url https://…/tracker-v0.2.0-linux-amd64.tar.gz
-#   sudo /opt/tracker/scripts/update.sh --file ./tracker-v0.2.0-linux-amd64.tar.gz   (or a bare binary)
+#   sudo /opt/trackstar/scripts/update.sh                       # latest release of the configured repo
+#   sudo /opt/trackstar/scripts/update.sh --version v0.2.0
+#   sudo /opt/trackstar/scripts/update.sh --url https://…/trackstar-v0.2.0-linux-amd64.tar.gz
+#   sudo /opt/trackstar/scripts/update.sh --file ./trackstar-v0.2.0-linux-amd64.tar.gz   (or a bare binary)
 #
-# The GitHub repository is read from --repo or /etc/tracker/release.conf (TRACKER_REPO=owner/name).
+# The GitHub repository is read from --repo or /etc/trackstar/release.conf (TRACKSTAR_REPO=owner/name).
 set -euo pipefail
 
-BIN_PATH=/usr/local/bin/tracker
-ENV_FILE=/etc/tracker/tracker.env
-RELEASE_CONF=/etc/tracker/release.conf
-OPT_DIR=/opt/tracker
+BIN_PATH=/usr/local/bin/trackstar
+ENV_FILE=/etc/trackstar/trackstar.env
+RELEASE_CONF=/etc/trackstar/release.conf
+OPT_DIR=/opt/trackstar
 
 VERSION=latest
 URL=""
@@ -51,7 +51,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 if [ -z "$FILE" ] && [ -z "$URL" ]; then
   if [ -z "$REPO" ] && [ -f "$RELEASE_CONF" ]; then
-    REPO=$(sed -n 's/^TRACKER_REPO=//p' "$RELEASE_CONF")
+    REPO=$(sed -n 's/^TRACKSTAR_REPO=//p' "$RELEASE_CONF")
   fi
   [ -n "$REPO" ] || die "no release source: pass --file, --url or --repo OWNER/NAME"
   api="https://api.github.com/repos/$REPO/releases/latest"
@@ -86,12 +86,12 @@ NEW_SCRIPTS=""
 if tar -tzf "$FILE" >/dev/null 2>&1; then
   mkdir -p "$WORK/release"
   tar -xzf "$FILE" -C "$WORK/release" --strip-components=1 --no-same-owner || die "cannot extract $FILE"
-  NEW_BIN=$WORK/release/tracker
+  NEW_BIN=$WORK/release/trackstar
   [ -d "$WORK/release/scripts" ] && NEW_SCRIPTS=$WORK/release
 else
   NEW_BIN=$FILE
 fi
-[ -f "$NEW_BIN" ] || die "the release does not contain a 'tracker' binary"
+[ -f "$NEW_BIN" ] || die "the release does not contain a 'trackstar' binary"
 chmod +x "$NEW_BIN"
 NEW_VERSION=$("$NEW_BIN" version 2>/dev/null) || die "the new binary does not run on this machine (wrong architecture or corrupt download)"
 OLD_VERSION=$("$BIN_PATH" version 2>/dev/null || echo unknown)
@@ -105,8 +105,8 @@ log "Updating $OLD_VERSION → $NEW_VERSION"
 # --- safety net -----------------------------------------------------------------
 
 get_env() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n1; }
-addr=$(get_env TRACKER_ADDR); port=${addr##*:}
-data_dir=$(get_env TRACKER_DATA_DIR); data_dir=${data_dir:-/var/lib/tracker}
+addr=$(get_env TRACKSTAR_ADDR); port=${addr##*:}
+data_dir=$(get_env TRACKSTAR_DATA_DIR); data_dir=${data_dir:-/var/lib/trackstar}
 health_url="http://127.0.0.1:${port:-3000}/health"
 
 wait_healthy() {
@@ -121,10 +121,10 @@ wait_healthy() {
 # schema — so a binary rollback is only safe together with this snapshot.
 snapshot_dir=$data_dir/backups
 snapshot=$snapshot_dir/pre-update-$(date -u +%Y%m%d-%H%M%S).db
-install -d -m 0750 -o tracker -g tracker "$snapshot_dir"
+install -d -m 0750 -o trackstar -g trackstar "$snapshot_dir"
 log "Snapshotting the database to $snapshot"
 # Run as the service user so SQLite's -wal/-shm files never end up owned by root.
-runuser -u tracker -- sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' sh "$ENV_FILE" "$BIN_PATH" backup "$snapshot" \
+runuser -u trackstar -- sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' sh "$ENV_FILE" "$BIN_PATH" backup "$snapshot" \
   || die "database snapshot failed; not updating"
 # keep the three most recent snapshots
 ls -1t "$snapshot_dir"/pre-update-*.db 2>/dev/null | tail -n +4 | xargs -r rm -f
@@ -135,31 +135,31 @@ cp -p "$BIN_PATH" "$BIN_PATH.previous"
 
 install -m 0755 -o root -g root "$NEW_BIN" "$BIN_PATH.new"
 mv -f "$BIN_PATH.new" "$BIN_PATH"
-log "Restarting tracker (migrations run on startup)"
-systemctl restart tracker || true
+log "Restarting trackstar (migrations run on startup)"
+systemctl restart trackstar || true
 
 if wait_healthy; then
   if [ -n "$NEW_SCRIPTS" ]; then
     install -m 0755 "$NEW_SCRIPTS"/scripts/*.sh "$OPT_DIR/scripts/"
     [ -d "$NEW_SCRIPTS/deploy" ] && install -m 0644 "$NEW_SCRIPTS"/deploy/* "$OPT_DIR/deploy/"
   fi
-  log "Tracker $NEW_VERSION is healthy. Previous binary kept at $BIN_PATH.previous"
+  log "Trackstar $NEW_VERSION is healthy. Previous binary kept at $BIN_PATH.previous"
   exit 0
 fi
 
 # --- rollback -------------------------------------------------------------------
 
 warn "new version failed its health check; rolling back to $OLD_VERSION"
-journalctl -u tracker --no-pager -n 25 || true
-systemctl stop tracker || true
+journalctl -u trackstar --no-pager -n 25 || true
+systemctl stop trackstar || true
 mv -f "$BIN_PATH.previous" "$BIN_PATH"
-db=$(get_env TRACKER_DATABASE_URL); db=${db:-$data_dir/tracker.db}
+db=$(get_env TRACKSTAR_DATABASE_URL); db=${db:-$data_dir/trackstar.db}
 # Restore the pre-update snapshot in case the failed version already migrated.
-install -m 0640 -o tracker -g tracker "$snapshot" "$db.rollback"
+install -m 0640 -o trackstar -g trackstar "$snapshot" "$db.rollback"
 rm -f "$db-wal" "$db-shm"
 mv -f "$db.rollback" "$db"
-systemctl start tracker || true
+systemctl start trackstar || true
 if wait_healthy; then
   die "update failed; rolled back to $OLD_VERSION (service is healthy)"
 fi
-die "update failed AND the rollback is unhealthy — inspect: journalctl -u tracker"
+die "update failed AND the rollback is unhealthy — inspect: journalctl -u trackstar"

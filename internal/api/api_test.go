@@ -17,12 +17,12 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"tracker/internal/auth"
-	"tracker/internal/database"
-	"tracker/internal/project"
-	"tracker/internal/story"
-	"tracker/internal/user"
-	"tracker/internal/velocity"
+	"trackstar/internal/auth"
+	"trackstar/internal/database"
+	"trackstar/internal/project"
+	"trackstar/internal/story"
+	"trackstar/internal/user"
+	"trackstar/internal/velocity"
 )
 
 type client struct {

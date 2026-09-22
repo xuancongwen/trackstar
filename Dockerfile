@@ -19,21 +19,21 @@ COPY internal/ internal/
 COPY db/ db/
 COPY web/embed.go web/embed.go
 COPY --from=frontend /src/web/dist web/dist
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/tracker ./cmd/tracker \
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/trackstar ./cmd/trackstar \
  && mkdir -p /out/data
 
 # --- runtime: just the binary (no shell, no Node, no package manager) ------------
 FROM gcr.io/distroless/static-debian12
-COPY --from=backend /out/tracker /usr/local/bin/tracker
+COPY --from=backend /out/trackstar /usr/local/bin/trackstar
 # Owned by the distroless "nonroot" user so a fresh named volume is writable.
-COPY --from=backend --chown=65532:65532 /out/data /var/lib/tracker
+COPY --from=backend --chown=65532:65532 /out/data /var/lib/trackstar
 
-ENV TRACKER_ADDR=0.0.0.0:3000 \
-    TRACKER_DATA_DIR=/var/lib/tracker \
-    TRACKER_DATABASE_DRIVER=sqlite \
-    TRACKER_DATABASE_URL=/var/lib/tracker/tracker.db
+ENV TRACKSTAR_ADDR=0.0.0.0:3000 \
+    TRACKSTAR_DATA_DIR=/var/lib/trackstar \
+    TRACKSTAR_DATABASE_DRIVER=sqlite \
+    TRACKSTAR_DATABASE_URL=/var/lib/trackstar/trackstar.db
 EXPOSE 3000
-VOLUME /var/lib/tracker
+VOLUME /var/lib/trackstar
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD ["/usr/local/bin/tracker", "healthcheck"]
-ENTRYPOINT ["/usr/local/bin/tracker"]
+  CMD ["/usr/local/bin/trackstar", "healthcheck"]
+ENTRYPOINT ["/usr/local/bin/trackstar"]

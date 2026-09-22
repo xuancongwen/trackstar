@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"tracker/internal/database"
-	"tracker/internal/project"
-	"tracker/internal/story"
-	"tracker/internal/testutil"
-	"tracker/internal/velocity"
+	"trackstar/internal/database"
+	"trackstar/internal/project"
+	"trackstar/internal/story"
+	"trackstar/internal/testutil"
+	"trackstar/internal/velocity"
 )
 
 type fixture struct {

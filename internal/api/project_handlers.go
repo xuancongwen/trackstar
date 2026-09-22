@@ -3,8 +3,8 @@ package api
 import (
 	"net/http"
 
-	"tracker/internal/apperr"
-	"tracker/internal/project"
+	"trackstar/internal/apperr"
+	"trackstar/internal/project"
 )
 
 // projectFromPath resolves {project}, which may be a numeric id or a slug.

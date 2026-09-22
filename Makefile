@@ -21,14 +21,14 @@ dev: web/node_modules
 		exit 1; \
 	fi
 	@trap 'kill 0 2>/dev/null' INT TERM EXIT; \
-	( TRACKER_ADDR=127.0.0.1:$(DEV_API_PORT) TRACKER_DATA_DIR=$(DEV_DATA_DIR) TRACKER_PUBLIC_URL=http://localhost:$(DEV_PORT)/ TRACKER_LOG_LEVEL=debug \
-	    go run ./cmd/tracker; echo "backend exited; stopping"; kill 0 ) & \
-	( TRACKER_DEV_PORT=$(DEV_PORT) TRACKER_DEV_BACKEND=http://127.0.0.1:$(DEV_API_PORT) npm --prefix web run dev; echo "vite exited; stopping"; kill 0 ) & \
+	( TRACKSTAR_ADDR=127.0.0.1:$(DEV_API_PORT) TRACKSTAR_DATA_DIR=$(DEV_DATA_DIR) TRACKSTAR_PUBLIC_URL=http://localhost:$(DEV_PORT)/ TRACKSTAR_LOG_LEVEL=debug \
+	    go run ./cmd/trackstar; echo "backend exited; stopping"; kill 0 ) & \
+	( TRACKSTAR_DEV_PORT=$(DEV_PORT) TRACKSTAR_DEV_BACKEND=http://127.0.0.1:$(DEV_API_PORT) npm --prefix web run dev; echo "vite exited; stopping"; kill 0 ) & \
 	wait
 
 ## backend: compile the Go binary with whatever is in web/dist
 backend:
-	CGO_ENABLED=0 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o bin/tracker ./cmd/tracker
+	CGO_ENABLED=0 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o bin/trackstar ./cmd/trackstar
 
 ## frontend: compile the Svelte app into web/dist
 frontend: web/node_modules
@@ -59,20 +59,20 @@ lint: web/node_modules
 
 ## migrate: apply migrations to the local development database
 migrate:
-	TRACKER_DATA_DIR=$(DEV_DATA_DIR) go run ./cmd/tracker migrate
+	TRACKSTAR_DATA_DIR=$(DEV_DATA_DIR) go run ./cmd/trackstar migrate
 
 ## sqlc: regenerate internal/database/dbgen from db/queries
 sqlc:
 	cd db && $(SQLC) generate
 
-## release: dist/tracker-<version>-<os>-<arch>.tar.gz (+ SHA256SUMS)
+## release: dist/trackstar-<version>-<os>-<arch>.tar.gz (+ SHA256SUMS)
 release: frontend
 	@rm -rf dist && mkdir -p dist
 	@for platform in $(PLATFORMS); do \
-		os=$${platform%/*}; arch=$${platform#*/}; name=tracker-$(VERSION)-$$os-$$arch; \
+		os=$${platform%/*}; arch=$${platform#*/}; name=trackstar-$(VERSION)-$$os-$$arch; \
 		echo "building $$name"; \
 		mkdir -p dist/$$name && \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/$$name/tracker ./cmd/tracker && \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/$$name/trackstar ./cmd/trackstar && \
 		cp -r scripts deploy README.md dist/$$name/ && \
 		tar -C dist --owner=0 --group=0 -czf dist/$$name.tar.gz $$name && rm -rf dist/$$name || exit 1; \
 	done
@@ -80,7 +80,7 @@ release: frontend
 
 ## docker: build the container image
 docker:
-	docker build --build-arg VERSION=$(VERSION) -t tracker:latest .
+	docker build --build-arg VERSION=$(VERSION) -t trackstar:latest .
 
 clean:
 	rm -rf bin dist data-dev

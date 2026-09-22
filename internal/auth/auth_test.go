@@ -7,9 +7,9 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"tracker/internal/apperr"
-	"tracker/internal/database"
-	"tracker/internal/database/dbgen"
+	"trackstar/internal/apperr"
+	"trackstar/internal/database"
+	"trackstar/internal/database/dbgen"
 )
 
 func newService(t *testing.T, allowRegistration bool) (*Service, *time.Time) {

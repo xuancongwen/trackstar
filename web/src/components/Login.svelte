@@ -37,7 +37,7 @@
 
 <main>
   <form class="modal" onsubmit={submit}>
-    <h1>Tracker</h1>
+    <h1>Trackstar</h1>
     {#if mode === 'register'}
       <label class="field">
         <span>Name</span>

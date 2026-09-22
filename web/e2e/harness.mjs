@@ -1,7 +1,7 @@
-// Shared harness: starts a fresh tracker binary on a free port with a temp
+// Shared harness: starts a fresh trackstar binary on a free port with a temp
 // data dir, registers a user, seeds a project, and returns logged-in pages.
 //
-//   TRACKER_BIN=../bin/tracker CHROME_PATH=/usr/bin/chromium node e2e/board.mjs
+//   TRACKSTAR_BIN=../bin/trackstar CHROME_PATH=/usr/bin/chromium node e2e/board.mjs
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
@@ -21,13 +21,13 @@ const freePort = () =>
     srv.on('error', reject)
   })
 
-export async function startTracker() {
-  const bin = process.env.TRACKER_BIN ?? path.resolve('../bin/tracker')
+export async function startTrackstar() {
+  const bin = process.env.TRACKSTAR_BIN ?? path.resolve('../bin/trackstar')
   const port = await freePort()
-  const dataDir = mkdtempSync(path.join(tmpdir(), 'tracker-e2e-'))
+  const dataDir = mkdtempSync(path.join(tmpdir(), 'trackstar-e2e-'))
   const base = `http://127.0.0.1:${port}`
   const proc = spawn(bin, [], {
-    env: { ...process.env, TRACKER_ADDR: `127.0.0.1:${port}`, TRACKER_DATA_DIR: dataDir, TRACKER_PUBLIC_URL: base + '/', TRACKER_LOG_LEVEL: 'warn' },
+    env: { ...process.env, TRACKSTAR_ADDR: `127.0.0.1:${port}`, TRACKSTAR_DATA_DIR: dataDir, TRACKSTAR_PUBLIC_URL: base + '/', TRACKSTAR_LOG_LEVEL: 'warn' },
     stdio: ['ignore', 'inherit', 'inherit'],
   })
   for (let i = 0; i < 100; i++) {
@@ -58,7 +58,7 @@ export async function login(base, email, password = 'e2e-password-1', displayNam
     })
   }
   if (!res.ok) throw new Error(`login ${email}: ${res.status} ${await res.text()}`)
-  const cookie = res.headers.get('set-cookie')?.match(/tracker_session=([^;]+)/)?.[1]
+  const cookie = res.headers.get('set-cookie')?.match(/trackstar_session=([^;]+)/)?.[1]
   if (!cookie) throw new Error('no session cookie')
   return { cookie, user: await res.json() }
 }
@@ -67,7 +67,7 @@ export function apiClient(base, cookie) {
   return async (method, path, body) => {
     const res = await fetch(base + path, {
       method,
-      headers: { 'Content-Type': 'application/json', Origin: base, Cookie: `tracker_session=${cookie}` },
+      headers: { 'Content-Type': 'application/json', Origin: base, Cookie: `trackstar_session=${cookie}` },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
     if (!res.ok) throw new Error(`${method} ${path}: ${res.status} ${await res.text()}`)
@@ -106,7 +106,7 @@ export async function openBoard(browser, base, cookie, slug, errors) {
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push('console: ' + m.text())
   })
-  await page.setCookie({ name: 'tracker_session', value: cookie, url: base })
+  await page.setCookie({ name: 'trackstar_session', value: cookie, url: base })
   await page.goto(`${base}/#/p/${slug}`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('.live.live', { timeout: 10000 })
   await page.waitForSelector('[data-story-id]')

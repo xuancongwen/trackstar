@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"tracker/internal/apperr"
+	"trackstar/internal/apperr"
 )
 
 const maxBodyBytes = 1 << 20

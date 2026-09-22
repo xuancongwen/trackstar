@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"tracker/internal/apperr"
-	"tracker/internal/database"
-	"tracker/internal/database/dbgen"
+	"trackstar/internal/apperr"
+	"trackstar/internal/database"
+	"trackstar/internal/database/dbgen"
 )
 
 type User struct {

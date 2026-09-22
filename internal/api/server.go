@@ -11,12 +11,12 @@ import (
 	"net/url"
 	"time"
 
-	"tracker/internal/auth"
-	"tracker/internal/events"
-	"tracker/internal/project"
-	"tracker/internal/story"
-	"tracker/internal/user"
-	"tracker/internal/velocity"
+	"trackstar/internal/auth"
+	"trackstar/internal/events"
+	"trackstar/internal/project"
+	"trackstar/internal/story"
+	"trackstar/internal/user"
+	"trackstar/internal/velocity"
 )
 
 // SystemDB is what the health and system-info endpoints need to know.

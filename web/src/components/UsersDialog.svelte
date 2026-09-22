@@ -44,7 +44,7 @@
     <h2>Users</h2>
     <p class="muted">
       Deactivated users cannot sign in but stay attached to their stories. New accounts are created by
-      registration (TRACKER_ALLOW_REGISTRATION).
+      registration (TRACKSTAR_ALLOW_REGISTRATION).
     </p>
     <table>
       <thead>

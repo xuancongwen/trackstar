@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"tracker/internal/config"
-	"tracker/internal/database/dbgen"
+	"trackstar/internal/config"
+	"trackstar/internal/database/dbgen"
 )
 
 func TestMigrationsApplyAndAreIdempotent(t *testing.T) {

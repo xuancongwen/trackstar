@@ -1,21 +1,21 @@
 [Unit]
-Description=Tracker - lightweight project tracker
+Description=Trackstar - lightweight project tracker
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=tracker
-Group=tracker
-EnvironmentFile=/etc/tracker/tracker.env
-ExecStart=/usr/local/bin/tracker
+User=trackstar
+Group=trackstar
+EnvironmentFile=/etc/trackstar/trackstar.env
+ExecStart=/usr/local/bin/trackstar
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=20
 
-# The only writable location. SQLite keeps tracker.db, its -wal/-shm files and
+# The only writable location. SQLite keeps trackstar.db, its -wal/-shm files and
 # the generated session_secret here.
-ReadWritePaths=/var/lib/tracker
+ReadWritePaths=/var/lib/trackstar
 UMask=0027
 
 # Sandboxing. All of this is compatible with a static Go binary + SQLite.

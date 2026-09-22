@@ -1,7 +1,7 @@
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { defineConfig } from 'vitest/config'
 
-const backend = process.env.TRACKER_DEV_BACKEND ?? 'http://127.0.0.1:3000'
+const backend = process.env.TRACKSTAR_DEV_BACKEND ?? 'http://127.0.0.1:3000'
 
 export default defineConfig({
   plugins: [svelte()],
@@ -10,9 +10,9 @@ export default defineConfig({
   publicDir: 'static',
   build: { outDir: 'dist', emptyOutDir: true, target: 'es2022' },
   server: {
-    port: Number(process.env.TRACKER_DEV_PORT ?? 5173),
+    port: Number(process.env.TRACKSTAR_DEV_PORT ?? 5173),
     // A taken port is an error: silently moving to 5174 would break the
-    // TRACKER_PUBLIC_URL the backend was started with.
+    // TRACKSTAR_PUBLIC_URL the backend was started with.
     strictPort: true,
     proxy: { '/api': backend, '/health': backend },
   },

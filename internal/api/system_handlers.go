@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"tracker/internal/apperr"
+	"trackstar/internal/apperr"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +72,7 @@ func (s *Server) frontendHandler() http.Handler {
 		if err != nil {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("Tracker API is running, but this binary was built without the frontend.\nRun `make build` (or `make dev` for development).\n"))
+			w.Write([]byte("Trackstar API is running, but this binary was built without the frontend.\nRun `make build` (or `make dev` for development).\n"))
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

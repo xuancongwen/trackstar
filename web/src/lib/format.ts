@@ -1,4 +1,4 @@
-// Iteration boundaries are midnights in the server's TRACKER_TIMEZONE, so
+// Iteration boundaries are midnights in the server's TRACKSTAR_TIMEZONE, so
 // days are formatted in that zone; clock times use the viewer's own zone.
 let day = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })
 const dayTime = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })

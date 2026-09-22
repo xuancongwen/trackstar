@@ -58,8 +58,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build image and probe /health
         run: |
-          docker build -t tracker:ci .
-          docker run -d --name tracker -p 3000:3000 -e TRACKER_PUBLIC_URL=http://localhost:3000/ tracker:ci
+          docker build -t trackstar:ci .
+          docker run -d --name trackstar -p 3000:3000 -e TRACKSTAR_PUBLIC_URL=http://localhost:3000/ trackstar:ci
           for i in $(seq 1 30); do curl -fsS localhost:3000/health && break; sleep 1; done
           curl -fsS localhost:3000/health | grep -q '"ok"'
-          docker logs tracker
+          docker logs trackstar

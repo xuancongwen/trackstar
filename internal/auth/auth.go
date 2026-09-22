@@ -15,10 +15,10 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"tracker/internal/apperr"
-	"tracker/internal/database"
-	"tracker/internal/database/dbgen"
-	"tracker/internal/user"
+	"trackstar/internal/apperr"
+	"trackstar/internal/database"
+	"trackstar/internal/database/dbgen"
+	"trackstar/internal/user"
 )
 
 const (
@@ -55,7 +55,7 @@ func NewService(store database.Store, opts Options) *Service {
 	// Compared against when the email is unknown so both paths cost the same.
 	// Hashing is deliberately slow, so it is computed on first use, not at startup.
 	dummy := sync.OnceValue(func() []byte {
-		hash, _ := bcrypt.GenerateFromPassword([]byte("tracker-dummy-password"), opts.BcryptCost)
+		hash, _ := bcrypt.GenerateFromPassword([]byte("trackstar-dummy-password"), opts.BcryptCost)
 		return hash
 	})
 	return &Service{
@@ -76,7 +76,7 @@ type RegisterInput struct {
 
 // RegistrationOpen reports whether a new account may be created right now.
 // The very first account can always be created (and becomes the admin), so
-// TRACKER_ALLOW_REGISTRATION=false never locks anyone out of a fresh install.
+// TRACKSTAR_ALLOW_REGISTRATION=false never locks anyone out of a fresh install.
 func (s *Service) RegistrationOpen(ctx context.Context) (bool, error) {
 	if s.allowRegistration {
 		return true, nil
@@ -135,7 +135,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (user.User, er
 }
 
 // SetPassword replaces a user's password and signs them out everywhere. It
-// backs the `tracker reset-password` command; there is no e-mail flow.
+// backs the `trackstar reset-password` command; there is no e-mail flow.
 func (s *Service) SetPassword(ctx context.Context, email, password string) error {
 	return s.setPassword(ctx, password, func(q dbgen.Querier) (dbgen.User, error) {
 		return q.GetUserByEmail(ctx, normalizeEmail(email))

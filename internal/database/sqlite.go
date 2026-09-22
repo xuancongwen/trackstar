@@ -12,8 +12,8 @@ import (
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite" // pure-Go driver: no cgo, static binaries
 
-	"tracker/db"
-	"tracker/internal/database/dbgen"
+	"trackstar/db"
+	"trackstar/internal/database/dbgen"
 )
 
 func openSQLite(ctx context.Context, path string) (*DB, error) {
@@ -94,7 +94,7 @@ func (d *DB) Health(ctx context.Context) error {
 
 // VerifySQLiteFile checks a database file that is not in use (a backup about
 // to be restored): it must pass SQLite's integrity check and contain a
-// tracker schema. It returns the schema version found.
+// trackstar schema. It returns the schema version found.
 func VerifySQLiteFile(ctx context.Context, path string) (int64, error) {
 	if _, err := os.Stat(path); err != nil {
 		return 0, err
@@ -115,7 +115,7 @@ func VerifySQLiteFile(ctx context.Context, path string) (int64, error) {
 	var version int64
 	err = sqlDB.QueryRowContext(ctx, "SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied").Scan(&version)
 	if err != nil {
-		return 0, fmt.Errorf("not a tracker database: %w", err)
+		return 0, fmt.Errorf("not a trackstar database: %w", err)
 	}
 	return version, nil
 }

@@ -13,8 +13,8 @@ import (
 	"errors"
 	"fmt"
 
-	"tracker/internal/config"
-	"tracker/internal/database/dbgen"
+	"trackstar/internal/config"
+	"trackstar/internal/database/dbgen"
 )
 
 // Store is the small persistence interface the services are written against.

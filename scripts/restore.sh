@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Restore a backup made by backup.sh.
 #
-#   sudo /opt/tracker/scripts/restore.sh /var/backups/tracker/tracker-backup-….tar.gz [--with-config]
+#   sudo /opt/trackstar/scripts/restore.sh /var/backups/trackstar/trackstar-backup-….tar.gz [--with-config]
 #
 # The current data is moved to <data-dir>/pre-restore-<timestamp>/ first and is
 # put back automatically if the restored service does not become healthy.
@@ -9,8 +9,8 @@
 # archive created with --include-secrets.
 set -euo pipefail
 
-BIN_PATH=/usr/local/bin/tracker
-ENV_FILE=${TRACKER_ENV_FILE:-/etc/tracker/tracker.env}
+BIN_PATH=/usr/local/bin/trackstar
+ENV_FILE=${TRACKSTAR_ENV_FILE:-/etc/trackstar/trackstar.env}
 ARCHIVE=""
 WITH_CONFIG=0
 
@@ -28,7 +28,7 @@ while [ $# -gt 0 ]; do
 done
 
 [ "$(id -u)" -eq 0 ] || die "run as root"
-[ -n "$ARCHIVE" ] || die "usage: restore.sh <tracker-backup-….tar.gz> [--with-config]"
+[ -n "$ARCHIVE" ] || die "usage: restore.sh <trackstar-backup-….tar.gz> [--with-config]"
 [ -f "$ARCHIVE" ] || die "archive not found: $ARCHIVE"
 [ -x "$BIN_PATH" ] || die "$BIN_PATH not found; run setup.sh first"
 [ -f "$ENV_FILE" ] || die "$ENV_FILE not found; run setup.sh first"
@@ -44,8 +44,8 @@ if tar -tzf "$ARCHIVE" | grep -qE '(^|/)\.\.(/|$)|^/'; then
 fi
 tar -xzf "$ARCHIVE" -C "$stage" --no-same-owner
 src=$(find "$stage" -mindepth 1 -maxdepth 1 -type d | head -n1)
-[ -n "$src" ] && [ -f "$src/tracker.db" ] || die "archive does not contain tracker.db"
-check=$("$BIN_PATH" check "$src/tracker.db") || die "tracker.db in the archive is corrupt or not a tracker database"
+[ -n "$src" ] && [ -f "$src/trackstar.db" ] || die "archive does not contain trackstar.db"
+check=$("$BIN_PATH" check "$src/trackstar.db") || die "trackstar.db in the archive is corrupt or not a trackstar database"
 log "Archive verified ($check)"
 [ -f "$src/MANIFEST" ] && sed 's/^/    /' "$src/MANIFEST"
 
@@ -55,35 +55,35 @@ if [ "$WITH_CONFIG" -eq 1 ]; then
 fi
 
 get_env() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n1; }
-data_dir=$(get_env TRACKER_DATA_DIR); data_dir=${data_dir:-/var/lib/tracker}
-db=$(get_env TRACKER_DATABASE_URL); db=${db:-$data_dir/tracker.db}
+data_dir=$(get_env TRACKSTAR_DATA_DIR); data_dir=${data_dir:-/var/lib/trackstar}
+db=$(get_env TRACKSTAR_DATABASE_URL); db=${db:-$data_dir/trackstar.db}
 
 # --- swap ---------------------------------------------------------------------------
 
-log "Stopping tracker"
-systemctl stop tracker
+log "Stopping trackstar"
+systemctl stop trackstar
 
 emergency=$data_dir/pre-restore-$(date +%Y%m%d-%H%M%S)
-install -d -m 0750 -o tracker -g tracker "$emergency"
+install -d -m 0750 -o trackstar -g trackstar "$emergency"
 for f in "$db" "$db-wal" "$db-shm"; do
   [ -e "$f" ] && mv "$f" "$emergency/"
 done
 [ -d "$data_dir/uploads" ] && mv "$data_dir/uploads" "$emergency/uploads"
 log "Current data preserved in $emergency"
 
-install -m 0640 -o tracker -g tracker "$src/tracker.db" "$db"
+install -m 0640 -o trackstar -g trackstar "$src/trackstar.db" "$db"
 if [ -d "$src/uploads" ]; then
   cp -a "$src/uploads" "$data_dir/uploads"
-  chown -R tracker:tracker "$data_dir/uploads"
+  chown -R trackstar:trackstar "$data_dir/uploads"
 fi
 if [ "$WITH_CONFIG" -eq 1 ]; then
-  cp -p "$ENV_FILE" "$emergency/tracker.env"
-  install -m 0640 -o root -g tracker "$src/tracker.env" "$ENV_FILE"
-  [ -f "$src/session_secret" ] && install -m 0600 -o tracker -g tracker "$src/session_secret" "$data_dir/session_secret"
+  cp -p "$ENV_FILE" "$emergency/trackstar.env"
+  install -m 0640 -o root -g trackstar "$src/trackstar.env" "$ENV_FILE"
+  [ -f "$src/session_secret" ] && install -m 0600 -o trackstar -g trackstar "$src/session_secret" "$data_dir/session_secret"
 fi
-chown tracker:tracker "$data_dir"
+chown trackstar:trackstar "$data_dir"
 
-addr=$(get_env TRACKER_ADDR); port=${addr##*:}
+addr=$(get_env TRACKSTAR_ADDR); port=${addr##*:}
 health_url="http://127.0.0.1:${port:-3000}/health"
 wait_healthy() {
   for _ in $(seq 1 30); do
@@ -93,16 +93,16 @@ wait_healthy() {
   return 1
 }
 
-log "Starting tracker"
-systemctl start tracker || true
+log "Starting trackstar"
+systemctl start trackstar || true
 if wait_healthy; then
   log "Restore complete and healthy. Remove $emergency once you are satisfied."
   exit 0
 fi
 
 warn "restored data did not come up healthy; putting the previous data back"
-journalctl -u tracker --no-pager -n 25 || true
-systemctl stop tracker || true
+journalctl -u trackstar --no-pager -n 25 || true
+systemctl stop trackstar || true
 rm -f "$db" "$db-wal" "$db-shm"
 for f in "$emergency"/"$(basename "$db")"*; do
   [ -e "$f" ] && mv "$f" "$(dirname "$db")/"
@@ -111,7 +111,7 @@ if [ -d "$emergency/uploads" ]; then
   rm -rf "$data_dir/uploads"
   mv "$emergency/uploads" "$data_dir/uploads"
 fi
-[ -f "$emergency/tracker.env" ] && install -m 0640 -o root -g tracker "$emergency/tracker.env" "$ENV_FILE"
-systemctl start tracker || true
+[ -f "$emergency/trackstar.env" ] && install -m 0640 -o root -g trackstar "$emergency/trackstar.env" "$ENV_FILE"
+systemctl start trackstar || true
 wait_healthy && die "restore failed; the previous data is back in place and healthy"
-die "restore failed and the previous data is unhealthy too — inspect: journalctl -u tracker"
+die "restore failed and the previous data is unhealthy too — inspect: journalctl -u trackstar"

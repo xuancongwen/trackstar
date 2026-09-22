@@ -1,19 +1,19 @@
 services:
-  tracker:
-    image: tracker:latest
+  trackstar:
+    image: trackstar:latest
     build: .
     restart: unless-stopped
     ports:
       - "3000:3000"
     volumes:
       # Created as root by the container (make dev keeps its own ./data-dev).
-      - ./data:/var/lib/tracker
+      - ./data:/var/lib/trackstar
     environment:
-      TRACKER_DATABASE_DRIVER: sqlite
-      TRACKER_DATABASE_URL: /var/lib/tracker/tracker.db
-      TRACKER_PUBLIC_URL: http://localhost:3000/
-      # TRACKER_ALLOW_REGISTRATION: "false"   # after creating your accounts
-      # TRACKER_TIMEZONE: Europe/Berlin
+      TRACKSTAR_DATABASE_DRIVER: sqlite
+      TRACKSTAR_DATABASE_URL: /var/lib/trackstar/trackstar.db
+      TRACKSTAR_PUBLIC_URL: http://localhost:3000/
+      # TRACKSTAR_ALLOW_REGISTRATION: "false"   # after creating your accounts
+      # TRACKSTAR_TIMEZONE: Europe/Berlin
     # The image runs as root so the ./data bind mount works whoever owns it.
     # To drop root: `mkdir -p data && sudo chown 65532:65532 data`, then enable:
     # user: "65532:65532"

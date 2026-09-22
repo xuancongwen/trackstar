@@ -12,7 +12,7 @@
 *.db-shm
 *.db-wal
 .env
-tracker.env
+trackstar.env
 
 # tooling
 .DS_Store

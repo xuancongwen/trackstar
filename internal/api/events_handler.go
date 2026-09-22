@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"tracker/internal/events"
+	"trackstar/internal/events"
 )
 
 const (
 	// clientHeader carries a random per-tab id on mutating requests; it is
 	// echoed in events so the originating tab can skip refetching its own change.
-	clientHeader = "X-Tracker-Client"
+	clientHeader = "X-Trackstar-Client"
 
 	// heartbeat keeps proxies from closing an idle stream (Cloudflare cuts
 	// streams idle for 100 s) and lets the server notice dead peers.

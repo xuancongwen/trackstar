@@ -11,10 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"tracker/internal/apperr"
-	"tracker/internal/database"
-	"tracker/internal/database/dbgen"
-	"tracker/internal/project"
+	"trackstar/internal/apperr"
+	"trackstar/internal/database"
+	"trackstar/internal/database/dbgen"
+	"trackstar/internal/project"
 )
 
 type Story struct {

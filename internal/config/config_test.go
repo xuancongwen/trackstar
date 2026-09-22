@@ -21,16 +21,16 @@ func TestLoadDefaults(t *testing.T) {
 
 func TestLoadReportsAllProblems(t *testing.T) {
 	_, err := Load(env(map[string]string{
-		"TRACKER_ADDR":               "nonsense",
-		"TRACKER_PUBLIC_URL":         "track.example.com",
-		"TRACKER_ALLOW_REGISTRATION": "maybe",
-		"TRACKER_SESSION_SECRET":     "short",
-		"TRACKER_DATABASE_DRIVER":    "mysql",
+		"TRACKSTAR_ADDR":               "nonsense",
+		"TRACKSTAR_PUBLIC_URL":         "track.example.com",
+		"TRACKSTAR_ALLOW_REGISTRATION": "maybe",
+		"TRACKSTAR_SESSION_SECRET":     "short",
+		"TRACKSTAR_DATABASE_DRIVER":    "mysql",
 	}))
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	for _, want := range []string{"TRACKER_ADDR", "TRACKER_PUBLIC_URL", "TRACKER_ALLOW_REGISTRATION", "TRACKER_SESSION_SECRET", "TRACKER_DATABASE_DRIVER"} {
+	for _, want := range []string{"TRACKSTAR_ADDR", "TRACKSTAR_PUBLIC_URL", "TRACKSTAR_ALLOW_REGISTRATION", "TRACKSTAR_SESSION_SECRET", "TRACKSTAR_DATABASE_DRIVER"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not mention %s: %v", want, err)
 		}
@@ -40,7 +40,7 @@ func TestLoadReportsAllProblems(t *testing.T) {
 func TestPrepareGeneratesStableSecret(t *testing.T) {
 	dir := t.TempDir()
 	load := func() string {
-		c, err := Load(env(map[string]string{"TRACKER_DATA_DIR": dir}))
+		c, err := Load(env(map[string]string{"TRACKSTAR_DATA_DIR": dir}))
 		if err != nil {
 			t.Fatal(err)
 		}

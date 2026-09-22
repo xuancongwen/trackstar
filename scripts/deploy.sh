@@ -5,10 +5,10 @@
 #   ./scripts/deploy.sh --skip-build deploy@track.example.com      (needs passwordless sudo)
 #   ./scripts/deploy.sh root@new-host -- --public-url https://track.example.com/
 #
-# On a host without Tracker this performs the first installation through
+# On a host without Trackstar this performs the first installation through
 # setup.sh (arguments after `--` are passed to it). On an installed host it
-# only swaps the binary: /etc/tracker/tracker.env is never touched, the old
-# binary is kept as tracker.previous and is restored if the health check fails.
+# only swaps the binary: /etc/trackstar/trackstar.env is never touched, the old
+# binary is kept as trackstar.previous and is restored if the health check fails.
 set -euo pipefail
 
 SKIP_BUILD=0
@@ -32,7 +32,7 @@ done
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
 
-SSH_OPTS=(-o ConnectTimeout=10 -o ControlMaster=auto -o ControlPersist=60 -o "ControlPath=/tmp/tracker-deploy-%C")
+SSH_OPTS=(-o ConnectTimeout=10 -o ControlMaster=auto -o ControlPersist=60 -o "ControlPath=/tmp/trackstar-deploy-%C")
 remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 
 log "Checking $TARGET"
@@ -51,44 +51,44 @@ if [ "$r_uid" != 0 ]; then
 fi
 
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
-OUT=$ROOT_DIR/bin/tracker-linux-$GOARCH
+OUT=$ROOT_DIR/bin/trackstar-linux-$GOARCH
 
 if [ "$SKIP_BUILD" -eq 0 ]; then
   log "Building frontend"
   [ -d web/node_modules ] || npm --prefix web ci --silent
   npm --prefix web run build --silent
-  log "Building tracker $VERSION for linux/$GOARCH"
+  log "Building trackstar $VERSION for linux/$GOARCH"
   CGO_ENABLED=0 GOOS=linux GOARCH=$GOARCH go build -trimpath \
-    -ldflags "-s -w -X main.version=$VERSION" -o "$OUT" ./cmd/tracker
+    -ldflags "-s -w -X main.version=$VERSION" -o "$OUT" ./cmd/trackstar
 fi
 [ -f "$OUT" ] || die "$OUT not found (build it, or drop --skip-build)"
 
 log "Uploading"
-STAGE=$(remote 'mktemp -d /tmp/tracker-deploy.XXXXXX')
+STAGE=$(remote 'mktemp -d /tmp/trackstar-deploy.XXXXXX')
 # shellcheck disable=SC2064
 trap "ssh ${SSH_OPTS[*]} $TARGET 'rm -rf $STAGE' >/dev/null 2>&1 || true" EXIT
 tar -C "$ROOT_DIR" -czf - scripts deploy -C "$(dirname "$OUT")" "$(basename "$OUT")" \
-  | remote "tar -xzf - --no-same-owner -C '$STAGE' && mv '$STAGE/$(basename "$OUT")' '$STAGE/tracker'"
+  | remote "tar -xzf - --no-same-owner -C '$STAGE' && mv '$STAGE/$(basename "$OUT")' '$STAGE/trackstar'"
 
-if ! remote "test -f /etc/tracker/tracker.env && test -x /usr/local/bin/tracker"; then
-  log "Tracker is not installed on $TARGET yet: running setup.sh"
+if ! remote "test -f /etc/trackstar/trackstar.env && test -x /usr/local/bin/trackstar"; then
+  log "Trackstar is not installed on $TARGET yet: running setup.sh"
   setup_args=""
   for a in "${SETUP_ARGS[@]+"${SETUP_ARGS[@]}"}"; do setup_args+=" $(printf '%q' "$a")"; done
-  remote "$SUDO bash '$STAGE/scripts/setup.sh' --binary '$STAGE/tracker'$setup_args"
+  remote "$SUDO bash '$STAGE/scripts/setup.sh' --binary '$STAGE/trackstar'$setup_args"
   exit 0
 fi
 
 log "Swapping binary on $TARGET"
 remote "$SUDO env STAGE='$STAGE' bash -s" <<'REMOTE'
 set -euo pipefail
-BIN=/usr/local/bin/tracker
-ENV_FILE=/etc/tracker/tracker.env
+BIN=/usr/local/bin/trackstar
+ENV_FILE=/etc/trackstar/trackstar.env
 say() { printf '    %s\n' "$*"; }
 
 get_env() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n1; }
-addr=$(get_env TRACKER_ADDR); port=${addr##*:}
-data_dir=$(get_env TRACKER_DATA_DIR); data_dir=${data_dir:-/var/lib/tracker}
-db=$(get_env TRACKER_DATABASE_URL); db=${db:-$data_dir/tracker.db}
+addr=$(get_env TRACKSTAR_ADDR); port=${addr##*:}
+data_dir=$(get_env TRACKSTAR_DATA_DIR); data_dir=${data_dir:-/var/lib/trackstar}
+db=$(get_env TRACKSTAR_DATABASE_URL); db=${db:-$data_dir/trackstar.db}
 health="http://127.0.0.1:${port:-3000}/health"
 wait_healthy() {
   for _ in $(seq 1 30); do
@@ -98,42 +98,42 @@ wait_healthy() {
   return 1
 }
 
-"$STAGE/tracker" version >/dev/null || { echo "uploaded binary does not run here" >&2; exit 1; }
-old=$("$BIN" version 2>/dev/null || echo unknown); new=$("$STAGE/tracker" version)
+"$STAGE/trackstar" version >/dev/null || { echo "uploaded binary does not run here" >&2; exit 1; }
+old=$("$BIN" version 2>/dev/null || echo unknown); new=$("$STAGE/trackstar" version)
 
 # Snapshot first: the new version may migrate the schema (see update.sh).
-install -d -m 0750 -o tracker -g tracker "$data_dir/backups"
+install -d -m 0750 -o trackstar -g trackstar "$data_dir/backups"
 snapshot=$data_dir/backups/pre-deploy-$(date -u +%Y%m%d-%H%M%S).db
-runuser -u tracker -- sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' sh "$ENV_FILE" "$BIN" backup "$snapshot"
+runuser -u trackstar -- sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' sh "$ENV_FILE" "$BIN" backup "$snapshot"
 ls -1t "$data_dir"/backups/pre-deploy-*.db 2>/dev/null | tail -n +4 | xargs -r rm -f
 say "database snapshot: $snapshot"
 
-install -m 0755 -o root -g root "$STAGE/tracker" "$BIN.new"
-say "stopping tracker"
-systemctl stop tracker
+install -m 0755 -o root -g root "$STAGE/trackstar" "$BIN.new"
+say "stopping trackstar"
+systemctl stop trackstar
 cp -p "$BIN" "$BIN.previous"
 mv -f "$BIN.new" "$BIN"                      # rename(2): atomic
-say "starting tracker $new (migrations run on startup)"
-systemctl start tracker || true
+say "starting trackstar $new (migrations run on startup)"
+systemctl start trackstar || true
 
 if wait_healthy; then
-  install -d /opt/tracker/scripts /opt/tracker/deploy
-  install -m 0755 "$STAGE"/scripts/*.sh /opt/tracker/scripts/
-  install -m 0644 "$STAGE"/deploy/* /opt/tracker/deploy/
+  install -d /opt/trackstar/scripts /opt/trackstar/deploy
+  install -m 0755 "$STAGE"/scripts/*.sh /opt/trackstar/scripts/
+  install -m 0644 "$STAGE"/deploy/* /opt/trackstar/deploy/
   say "healthy: $old → $new   (rollback binary: $BIN.previous)"
   exit 0
 fi
 
 echo "new version failed its health check; rolling back to $old" >&2
-journalctl -u tracker --no-pager -n 25 >&2 || true
-systemctl stop tracker || true
+journalctl -u trackstar --no-pager -n 25 >&2 || true
+systemctl stop trackstar || true
 mv -f "$BIN.previous" "$BIN"
 rm -f "$db-wal" "$db-shm"
-install -m 0640 -o tracker -g tracker "$snapshot" "$db"
-systemctl start tracker || true
+install -m 0640 -o trackstar -g trackstar "$snapshot" "$db"
+systemctl start trackstar || true
 wait_healthy && echo "rolled back; service is healthy on $old" >&2
 exit 1
 REMOTE
 
 log "Deployed $VERSION to $TARGET"
-remote "$SUDO systemctl --no-pager --lines=0 status tracker" || true
+remote "$SUDO systemctl --no-pager --lines=0 status trackstar" || true

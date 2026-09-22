@@ -165,7 +165,7 @@
     ;(async () => {
       try {
         project = await api.project(slug)
-        document.title = `${project.name} · Tracker`
+        document.title = `${project.name} · Trackstar`
         userList = await api.users()
         await refresh()
         live = connectLive({ projectId: project.id, onChange: refreshWhenIdle, onStatus: (st) => (liveStatus = st) })
@@ -185,7 +185,7 @@
       live?.close()
       clearInterval(timer)
       document.removeEventListener('visibilitychange', tick)
-      document.title = 'Tracker'
+      document.title = 'Trackstar'
     }
   })
 
@@ -418,7 +418,7 @@
 {:else if project}
   <div class="board">
     <header class="topbar">
-      <a href="#/" class="home" title="All projects">Tracker</a>
+      <a href="#/" class="home" title="All projects">Trackstar</a>
       <strong>{project.name}</strong>
       {#if velocity}
         <span class="velocity" title={velocity.estimated

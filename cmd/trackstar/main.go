@@ -1,4 +1,4 @@
-// Command tracker is the whole application: HTTP API, embedded frontend,
+// Command trackstar is the whole application: HTTP API, embedded frontend,
 // migrations and a few operational subcommands in one binary.
 package main
 
@@ -15,23 +15,23 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	_ "time/tzdata" // TRACKER_TIMEZONE must work on hosts without zoneinfo
+	_ "time/tzdata" // TRACKSTAR_TIMEZONE must work on hosts without zoneinfo
 
-	"tracker/internal/api"
-	"tracker/internal/auth"
-	"tracker/internal/config"
-	"tracker/internal/database"
-	"tracker/internal/project"
-	"tracker/internal/story"
-	"tracker/internal/user"
-	"tracker/internal/velocity"
-	"tracker/web"
+	"trackstar/internal/api"
+	"trackstar/internal/auth"
+	"trackstar/internal/config"
+	"trackstar/internal/database"
+	"trackstar/internal/project"
+	"trackstar/internal/story"
+	"trackstar/internal/user"
+	"trackstar/internal/velocity"
+	"trackstar/web"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
-const usage = `Usage: tracker [command]
+const usage = `Usage: trackstar [command]
 
 Commands:
   serve               run the server (default)
@@ -42,7 +42,7 @@ Commands:
   healthcheck         query /health of the local server; exit status reflects health
   version             print the version
 
-Configuration comes from TRACKER_* environment variables; see deploy/tracker.env.example.
+Configuration comes from TRACKSTAR_* environment variables; see deploy/trackstar.env.example.
 `
 
 func main() {
@@ -64,7 +64,7 @@ func main() {
 		})
 	case "backup":
 		if len(os.Args) != 3 {
-			err = errors.New("usage: tracker backup <destination-file>")
+			err = errors.New("usage: trackstar backup <destination-file>")
 			break
 		}
 		err = withDB(func(ctx context.Context, _ *config.Config, db *database.DB) error {
@@ -72,7 +72,7 @@ func main() {
 		})
 	case "check":
 		if len(os.Args) != 3 {
-			err = errors.New("usage: tracker check <database-file>")
+			err = errors.New("usage: trackstar check <database-file>")
 			break
 		}
 		var v int64
@@ -81,7 +81,7 @@ func main() {
 		}
 	case "reset-password":
 		if len(os.Args) != 3 {
-			err = errors.New("usage: tracker reset-password <email>   (new password on stdin)")
+			err = errors.New("usage: trackstar reset-password <email>   (new password on stdin)")
 			break
 		}
 		err = withDB(func(ctx context.Context, cfg *config.Config, db *database.DB) error {
@@ -108,7 +108,7 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "tracker:", err)
+		fmt.Fprintln(os.Stderr, "trackstar:", err)
 		os.Exit(1)
 	}
 }
@@ -175,7 +175,7 @@ func serve() error {
 		if err != nil {
 			return err
 		}
-		logger.Info("tracker started",
+		logger.Info("trackstar started",
 			"version", version,
 			"addr", ln.Addr().String(),
 			"public_url", cfg.PublicURL.String(),

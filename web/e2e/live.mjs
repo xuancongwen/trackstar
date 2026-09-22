@@ -1,16 +1,16 @@
 // Two browsers on one project: changes propagate live and never disturb a drag.
-import { apiClient, checker, drag, dragOnto, launchBrowser, login, openBoard, order, seed, sleep, startTracker, storyId } from './harness.mjs'
+import { apiClient, checker, drag, dragOnto, launchBrowser, login, openBoard, order, seed, sleep, startTrackstar, storyId } from './harness.mjs'
 
 const t = checker()
 const errors = []
-const tracker = await startTracker()
+const trackstar = await startTrackstar()
 const browser = await launchBrowser()
 try {
-  const sam = await login(tracker.base, 'sam@example.com', 'e2e-password-1', 'Sam')
-  const kim = await login(tracker.base, 'kim@example.com', 'e2e-password-1', 'Kim')
-  const project = await seed(apiClient(tracker.base, sam.cookie))
-  const A = await openBoard(browser, tracker.base, sam.cookie, project.slug, errors)
-  const B = await openBoard(browser, tracker.base, kim.cookie, project.slug, errors)
+  const sam = await login(trackstar.base, 'sam@example.com', 'e2e-password-1', 'Sam')
+  const kim = await login(trackstar.base, 'kim@example.com', 'e2e-password-1', 'Kim')
+  const project = await seed(apiClient(trackstar.base, sam.cookie))
+  const A = await openBoard(browser, trackstar.base, sam.cookie, project.slug, errors)
+  const B = await openBoard(browser, trackstar.base, kim.cookie, project.slug, errors)
   const sel = async (page, title) => `[data-story-id="${await storyId(page, title)}"]`
 
   async function waitFor(page, section, want, limit = 3000) {
@@ -58,6 +58,6 @@ try {
   t.eq('undo propagates', (await order(B, 'backlog')).includes('Live-created story'), true)
 } finally {
   await browser.close()
-  tracker.stop()
+  trackstar.stop()
 }
 t.done(errors)

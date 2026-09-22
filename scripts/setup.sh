@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Install Tracker natively on a fresh Debian/Ubuntu machine (droplet, VM, LXC).
+# Install Trackstar natively on a fresh Debian/Ubuntu machine (droplet, VM, LXC).
 # Safe to re-run: existing configuration, secrets and data are kept.
 #
 #   sudo ./setup.sh --public-url https://track.example.com/ --port 3000
 #
 # The binary comes from (first match wins):
-#   --binary PATH          a tracker executable
-#   ../tracker             when run from an extracted release archive
-#   ../bin/tracker         when run from a source checkout after `make build`
+#   --binary PATH          a trackstar executable
+#   ../trackstar             when run from an extracted release archive
+#   ../bin/trackstar         when run from a source checkout after `make build`
 #   --release-url URL      a release .tar.gz to download
 #   --repo OWNER/NAME      the latest (or --version TAG) GitHub release
 set -euo pipefail
@@ -23,13 +23,13 @@ TIMEZONE=""
 ALLOW_REGISTRATION=""
 START=1
 
-BIN_PATH=/usr/local/bin/tracker
-ETC_DIR=/etc/tracker
-ENV_FILE=$ETC_DIR/tracker.env
-DATA_DIR=/var/lib/tracker
-OPT_DIR=/opt/tracker
-UNIT=/etc/systemd/system/tracker.service
-DROPIN_DIR=/etc/systemd/system/tracker.service.d
+BIN_PATH=/usr/local/bin/trackstar
+ETC_DIR=/etc/trackstar
+ENV_FILE=$ETC_DIR/trackstar.env
+DATA_DIR=/var/lib/trackstar
+OPT_DIR=/opt/trackstar
+UNIT=/etc/systemd/system/trackstar.service
+DROPIN_DIR=/etc/systemd/system/trackstar.service.d
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT_DIR=$(dirname "$SCRIPT_DIR")
@@ -118,16 +118,16 @@ fetch_release() { # url → extracts into $WORK/release, sets BINARY
   curl -fsSL --retry 3 -o "$WORK/release.tar.gz" "$1" || die "download failed: $1"
   mkdir -p "$WORK/release"
   tar -xzf "$WORK/release.tar.gz" -C "$WORK/release" --strip-components=1 --no-same-owner || die "cannot extract the release archive"
-  BINARY=$WORK/release/tracker
+  BINARY=$WORK/release/trackstar
   # Prefer the scripts and unit file that ship with the downloaded version.
   [ -d "$WORK/release/scripts" ] && ROOT_DIR=$WORK/release
 }
 
 if [ -z "$BINARY" ]; then
-  if [ -x "$ROOT_DIR/tracker" ]; then
-    BINARY=$ROOT_DIR/tracker
-  elif [ -x "$ROOT_DIR/bin/tracker" ]; then
-    BINARY=$ROOT_DIR/bin/tracker
+  if [ -x "$ROOT_DIR/trackstar" ]; then
+    BINARY=$ROOT_DIR/trackstar
+  elif [ -x "$ROOT_DIR/bin/trackstar" ]; then
+    BINARY=$ROOT_DIR/bin/trackstar
   elif [ -n "$RELEASE_URL" ]; then
     fetch_release "$RELEASE_URL"
   elif [ -n "$REPO" ]; then
@@ -140,27 +140,27 @@ if [ -z "$BINARY" ]; then
     log "No new binary supplied; keeping the installed $BIN_PATH"
     BINARY=$BIN_PATH
   else
-    die "no tracker binary found; pass --binary, --release-url or --repo"
+    die "no trackstar binary found; pass --binary, --release-url or --repo"
   fi
 fi
 [ -f "$BINARY" ] || die "binary not found: $BINARY"
 NEW_VERSION=$("$BINARY" version 2>/dev/null) || die "$BINARY does not run on this machine (wrong architecture?)"
-log "Tracker version: $NEW_VERSION"
+log "Trackstar version: $NEW_VERSION"
 
 # --- user, directories ----------------------------------------------------------
 
-if ! id tracker >/dev/null 2>&1; then
-  log "Creating system user 'tracker'"
-  useradd --system --home-dir "$DATA_DIR" --no-create-home --shell /usr/sbin/nologin tracker
+if ! id trackstar >/dev/null 2>&1; then
+  log "Creating system user 'trackstar'"
+  useradd --system --home-dir "$DATA_DIR" --no-create-home --shell /usr/sbin/nologin trackstar
 fi
-install -d -m 0750 -o root    -g tracker "$ETC_DIR"
-install -d -m 0750 -o tracker -g tracker "$DATA_DIR"
+install -d -m 0750 -o root    -g trackstar "$ETC_DIR"
+install -d -m 0750 -o trackstar -g trackstar "$DATA_DIR"
 install -d -m 0755 "$OPT_DIR" "$OPT_DIR/scripts" "$OPT_DIR/deploy"
 
 # --- binary, scripts ------------------------------------------------------------
 
 WAS_ACTIVE=0
-systemctl is-active --quiet tracker 2>/dev/null && WAS_ACTIVE=1
+systemctl is-active --quiet trackstar 2>/dev/null && WAS_ACTIVE=1
 
 if [ "$BINARY" != "$BIN_PATH" ]; then
   if [ -x "$BIN_PATH" ] && ! cmp -s "$BINARY" "$BIN_PATH"; then
@@ -179,7 +179,7 @@ for f in "$ROOT_DIR"/deploy/*; do
   [ -f "$f" ] && install -m 0644 "$f" "$OPT_DIR/deploy/"
 done
 if [ -n "$REPO" ]; then
-  printf 'TRACKER_REPO=%s\n' "$REPO" > "$ETC_DIR/release.conf"
+  printf 'TRACKSTAR_REPO=%s\n' "$REPO" > "$ETC_DIR/release.conf"
 fi
 
 # --- configuration --------------------------------------------------------------
@@ -201,39 +201,39 @@ if [ ! -f "$ENV_FILE" ]; then
   host_ip=$(hostname -I 2>/dev/null | awk '{print $1}') || true
   umask 027
   cat > "$ENV_FILE" <<ENV
-# Tracker configuration. Documented in $OPT_DIR/deploy/tracker.env.example
-TRACKER_ADDR=${BIND_HOST:-0.0.0.0}:$port
-TRACKER_DATA_DIR=$DATA_DIR
-TRACKER_DATABASE_DRIVER=sqlite
-TRACKER_DATABASE_URL=$DATA_DIR/tracker.db
-TRACKER_PUBLIC_URL=${PUBLIC_URL:-http://${host_ip:-localhost}:$port/}
-TRACKER_ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
-TRACKER_SESSION_SECRET=
-TRACKER_LOG_LEVEL=info
-TRACKER_TIMEZONE=${TIMEZONE:-UTC}
-TRACKER_TRUSTED_PROXIES=127.0.0.0/8,::1/128
+# Trackstar configuration. Documented in $OPT_DIR/deploy/trackstar.env.example
+TRACKSTAR_ADDR=${BIND_HOST:-0.0.0.0}:$port
+TRACKSTAR_DATA_DIR=$DATA_DIR
+TRACKSTAR_DATABASE_DRIVER=sqlite
+TRACKSTAR_DATABASE_URL=$DATA_DIR/trackstar.db
+TRACKSTAR_PUBLIC_URL=${PUBLIC_URL:-http://${host_ip:-localhost}:$port/}
+TRACKSTAR_ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
+TRACKSTAR_SESSION_SECRET=
+TRACKSTAR_LOG_LEVEL=info
+TRACKSTAR_TIMEZONE=${TIMEZONE:-UTC}
+TRACKSTAR_TRUSTED_PROXIES=127.0.0.0/8,::1/128
 ENV
 else
   log "Keeping existing $ENV_FILE (only explicitly passed options are updated)"
   if [ -n "$PORT" ] || [ -n "$BIND_HOST" ]; then
-    current=$(get_env TRACKER_ADDR)
-    set_env TRACKER_ADDR "${BIND_HOST:-${current%:*}}:${PORT:-${current##*:}}"
+    current=$(get_env TRACKSTAR_ADDR)
+    set_env TRACKSTAR_ADDR "${BIND_HOST:-${current%:*}}:${PORT:-${current##*:}}"
   fi
-  [ -z "$PUBLIC_URL" ] || set_env TRACKER_PUBLIC_URL "$PUBLIC_URL"
-  [ -z "$TIMEZONE" ] || set_env TRACKER_TIMEZONE "$TIMEZONE"
-  [ -z "$ALLOW_REGISTRATION" ] || set_env TRACKER_ALLOW_REGISTRATION "$ALLOW_REGISTRATION"
+  [ -z "$PUBLIC_URL" ] || set_env TRACKSTAR_PUBLIC_URL "$PUBLIC_URL"
+  [ -z "$TIMEZONE" ] || set_env TRACKSTAR_TIMEZONE "$TIMEZONE"
+  [ -z "$ALLOW_REGISTRATION" ] || set_env TRACKSTAR_ALLOW_REGISTRATION "$ALLOW_REGISTRATION"
 fi
 
-if [ -z "$(get_env TRACKER_SESSION_SECRET)" ]; then
+if [ -z "$(get_env TRACKSTAR_SESSION_SECRET)" ]; then
   log "Generating session secret"
-  set_env TRACKER_SESSION_SECRET "$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
+  set_env TRACKSTAR_SESSION_SECRET "$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
 fi
-chown root:tracker "$ENV_FILE"
+chown root:trackstar "$ENV_FILE"
 chmod 0640 "$ENV_FILE"
 
 # --- systemd --------------------------------------------------------------------
 
-install -m 0644 "$ROOT_DIR/deploy/tracker.service" "$UNIT"
+install -m 0644 "$ROOT_DIR/deploy/trackstar.service" "$UNIT"
 
 # Unprivileged containers without nesting cannot create mount namespaces, which
 # ProtectSystem=/PrivateTmp= & co. need (the service would die with 226/NAMESPACE).
@@ -246,7 +246,7 @@ else
   install -d -m 0755 "$DROPIN_DIR"
   cat > "$DROPIN_DIR/10-no-namespaces.conf" <<'DROPIN'
 # Written by setup.sh: this environment cannot create mount namespaces.
-# The service still runs as the unprivileged 'tracker' user without capabilities.
+# The service still runs as the unprivileged 'trackstar' user without capabilities.
 [Service]
 PrivateTmp=false
 PrivateDevices=false
@@ -260,19 +260,19 @@ DROPIN
 fi
 
 systemctl daemon-reload
-systemctl enable --quiet tracker
+systemctl enable --quiet trackstar
 
-addr=$(get_env TRACKER_ADDR)
+addr=$(get_env TRACKSTAR_ADDR)
 port=${addr##*:}
 health_url="http://127.0.0.1:$port/health"
 
 if [ "$START" -eq 0 ]; then
-  log "Installed. Start with: systemctl start tracker"
+  log "Installed. Start with: systemctl start trackstar"
   exit 0
 fi
 
-log "Starting tracker"
-systemctl restart tracker
+log "Starting trackstar"
+systemctl restart trackstar
 
 healthy=0
 for _ in $(seq 1 30); do
@@ -281,29 +281,29 @@ for _ in $(seq 1 30); do
 done
 
 echo
-systemctl --no-pager --lines=0 status tracker || true
+systemctl --no-pager --lines=0 status trackstar || true
 echo
 if [ "$healthy" -ne 1 ]; then
-  journalctl -u tracker --no-pager -n 30 || true
+  journalctl -u trackstar --no-pager -n 30 || true
   if [ "$WAS_ACTIVE" -eq 1 ] && [ -x "$BIN_PATH.previous" ]; then
     warn "restoring the previous binary"
     mv -f "$BIN_PATH.previous" "$BIN_PATH"
-    systemctl restart tracker || true
+    systemctl restart trackstar || true
   fi
-  die "tracker did not become healthy at $health_url"
+  die "trackstar did not become healthy at $health_url"
 fi
 
 cat <<DONE
-Tracker $NEW_VERSION is running.
+Trackstar $NEW_VERSION is running.
 
-  URL:      $(get_env TRACKER_PUBLIC_URL)
+  URL:      $(get_env TRACKSTAR_PUBLIC_URL)
   Health:   $health_url
   Config:   $ENV_FILE
   Data:     $DATA_DIR
-  Logs:     journalctl -u tracker -f
+  Logs:     journalctl -u trackstar -f
   Backup:   $OPT_DIR/scripts/backup.sh
   Update:   $OPT_DIR/scripts/update.sh
 
 Open the URL and register: the first account becomes the administrator.
-Afterwards set TRACKER_ALLOW_REGISTRATION=false in $ENV_FILE to close sign-ups.
+Afterwards set TRACKSTAR_ALLOW_REGISTRATION=false in $ENV_FILE to close sign-ups.
 DONE

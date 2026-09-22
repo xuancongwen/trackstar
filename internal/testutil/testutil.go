@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"tracker/internal/database"
-	"tracker/internal/database/dbgen"
+	"trackstar/internal/database"
+	"trackstar/internal/database/dbgen"
 )
 
 // Clock is a manually advanced clock.

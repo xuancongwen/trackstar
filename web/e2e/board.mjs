@@ -1,16 +1,16 @@
 // Single-user board behaviour: drag/drop (rows and empty column space),
 // keyboard, workflow buttons, search, trash + undo, account dialog.
-import { apiClient, checker, drag, dragOnto, dragToEmptySpace, launchBrowser, login, openBoard, order, seed, sleep, startTracker, storyId } from './harness.mjs'
+import { apiClient, checker, drag, dragOnto, dragToEmptySpace, launchBrowser, login, openBoard, order, seed, sleep, startTrackstar, storyId } from './harness.mjs'
 
 const t = checker()
 const errors = []
-const tracker = await startTracker()
+const trackstar = await startTrackstar()
 const browser = await launchBrowser()
 try {
-  const { cookie } = await login(tracker.base, 'sam@example.com', 'e2e-password-1', 'Sam Wen')
-  const api = apiClient(tracker.base, cookie)
+  const { cookie } = await login(trackstar.base, 'sam@example.com', 'e2e-password-1', 'Sam Wen')
+  const api = apiClient(trackstar.base, cookie)
   const project = await seed(api)
-  const page = await openBoard(browser, tracker.base, cookie, project.slug, errors)
+  const page = await openBoard(browser, trackstar.base, cookie, project.slug, errors)
   const id = (title) => storyId(page, title)
   const sel = (title) => `[data-story-id="${title}"]`
 
@@ -93,6 +93,6 @@ try {
   t.eq('topbar shows the new name', await page.$eval('.menu > button', (e) => e.textContent.trim()), 'Samantha ▾')
 } finally {
   await browser.close()
-  tracker.stop()
+  trackstar.stop()
 }
 t.done(errors)
