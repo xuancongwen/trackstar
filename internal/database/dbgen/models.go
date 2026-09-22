@@ -18,6 +18,16 @@ type Activity struct {
 	CreatedAt int64
 }
 
+type ApiToken struct {
+	ID         int64
+	UserID     int64
+	Name       string
+	TokenHash  string
+	CreatedAt  int64
+	LastUsedAt sql.NullInt64
+	ExpiresAt  sql.NullInt64
+}
+
 type Comment struct {
 	ID        int64
 	StoryID   int64

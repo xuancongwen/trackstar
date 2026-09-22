@@ -21,6 +21,7 @@ type Querier interface {
 	CountStoriesByState(ctx context.Context) ([]CountStoriesByStateRow, error)
 	CountTasksByProject(ctx context.Context, projectID int64) ([]CountTasksByProjectRow, error)
 	CountUsers(ctx context.Context) (int64, error)
+	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ApiToken, error)
 	CreateActivity(ctx context.Context, arg CreateActivityParams) error
 	CreateComment(ctx context.Context, arg CreateCommentParams) (Comment, error)
 	CreateEpic(ctx context.Context, arg CreateEpicParams) (Label, error)
@@ -31,6 +32,7 @@ type Querier interface {
 	CreateStory(ctx context.Context, arg CreateStoryParams) (Story, error)
 	CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error)
 	DeleteComment(ctx context.Context, id int64) error
 	DeleteExpiredSessions(ctx context.Context, now int64) error
 	DeleteProject(ctx context.Context, id int64) error
@@ -41,7 +43,9 @@ type Querier interface {
 	DeleteTask(ctx context.Context, id int64) error
 	// Plain labels disappear with their last story; epics are kept until demoted.
 	DeleteUnusedLabels(ctx context.Context, projectID int64) error
+	DeleteUserAPITokens(ctx context.Context, userID int64) error
 	DeleteUserSessions(ctx context.Context, userID int64) error
+	GetAPITokenUser(ctx context.Context, arg GetAPITokenUserParams) (GetAPITokenUserRow, error)
 	GetComment(ctx context.Context, id int64) (Comment, error)
 	GetLabel(ctx context.Context, id int64) (Label, error)
 	GetLabelByName(ctx context.Context, arg GetLabelByNameParams) (Label, error)
@@ -53,6 +57,7 @@ type Querier interface {
 	GetTask(ctx context.Context, id int64) (Task, error)
 	GetUser(ctx context.Context, id int64) (User, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	ListAPITokens(ctx context.Context, userID int64) ([]ApiToken, error)
 	ListAcceptedStories(ctx context.Context, arg ListAcceptedStoriesParams) ([]Story, error)
 	// Every story that is still "live": everything not accepted, plus stories
 	// accepted at or after the given instant (the start of the current iteration).
@@ -85,6 +90,7 @@ type Querier interface {
 	SearchStories(ctx context.Context, arg SearchStoriesParams) ([]Story, error)
 	SetStoryDeleted(ctx context.Context, arg SetStoryDeletedParams) error
 	SetStoryPosition(ctx context.Context, arg SetStoryPositionParams) error
+	TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error
 	UpdateLabel(ctx context.Context, arg UpdateLabelParams) (Label, error)
 	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)
 	UpdateStory(ctx context.Context, arg UpdateStoryParams) (Story, error)

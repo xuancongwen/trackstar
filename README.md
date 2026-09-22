@@ -80,7 +80,11 @@ you land on the board:
   in the visible panel. Reordering is hold-to-drag (a quick swipe scrolls);
   moving between panels is done from the story's **Move to** buttons. The
   drawer fills the screen.
-- Your name and password live under *your name ▸ Account*. Administrators get
+- Your name and password live under *your name ▸ Account*, as do your **API
+  tokens**: a token acts as you for scripts and MCP clients (send it as
+  `Authorization: Bearer tst_…`). The secret is shown once; revoke it from the
+  same dialog. Tokens cannot change passwords, manage accounts or mint tokens.
+  Administrators get
   *Users*: rename, promote/demote, deactivate/reactivate, reset a password.
   Administrators can also **Reopen** an accepted story (it drops out of
   velocity history).
@@ -149,6 +153,13 @@ Design decisions worth knowing:
 - **Sessions** are random tokens in an HttpOnly, SameSite=Lax cookie; only an
   HMAC (keyed with the session secret) is stored. State-changing requests with
   a foreign `Origin` are rejected.
+- **API tokens** (`tst_…`) are stored the same way and checked before the
+  cookie, so a script never acts as whoever is signed in to the browser. A
+  bearer request skips the login rate limiter (it carries no password; a miss
+  is one indexed lookup) and is refused on the account and token routes, so a
+  leaked token is contained to the project data its owner can reach.
+  Deactivating a user disables their tokens at once; a password change does
+  not (revoke them from *Account*).
 - **Live updates without websockets or workers.** Every successful write
   publishes a tiny "project N changed" event to an in-process hub; each open
   board holds one Server-Sent Events stream (`GET /api/projects/:id/events`)
@@ -436,7 +447,9 @@ The archive holds a consistent `trackstar.db` (taken online with `VACUUM INTO`
 and verified with `PRAGMA integrity_check`), `trackstar.env` with the session
 secret blanked, a `MANIFEST`, and `uploads/` should that directory ever exist.
 `--include-secrets` keeps the secret (restore with `--with-config` to bring the
-configuration back too); without it a restore simply signs everyone out.
+configuration back too); without it a restore simply signs everyone out and
+invalidates every API token (they are keyed with the same secret), so MCP
+clients and scripts need new ones.
 
 `restore.sh` validates the archive *before* touching anything, stops the
 service, moves the current data to `/var/lib/trackstar/pre-restore-<timestamp>/`,
@@ -469,12 +482,15 @@ on startup), verifies `/health`, and rolls back on failure. It never touches
 
 ## API
 
-JSON over cookies; errors are `{"error": "…"}` with 401/403/404/409/422/429.
+JSON over cookies or `Authorization: Bearer <api token>`; errors are
+`{"error": "…"}` with 401/403/404/409/422/429. Routes marked *(session)*
+refuse bearer tokens.
 
 ```
 POST   /api/auth/register | /api/auth/login | /api/auth/logout
-GET    /api/me            PATCH /api/me {display_name, current_password, new_password}
-GET    /api/users         PATCH /api/users/:id {display_name, is_admin, is_active}   POST /api/users/:id/password   (admin)
+GET    /api/me            PATCH /api/me {display_name, current_password, new_password}   (session)
+GET    /api/me/tokens     POST /api/me/tokens {name, expires_in_days?} → {…, token}   DELETE /api/me/tokens/:id   (session)
+GET    /api/users         PATCH /api/users/:id {display_name, is_admin, is_active}   POST /api/users/:id/password   (admin, session)
 GET    /api/config
 GET    /api/projects      POST /api/projects
 GET    /api/projects/:id  PATCH … DELETE …       (:id may be the numeric id or the slug)

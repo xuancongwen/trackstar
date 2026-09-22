@@ -89,6 +89,22 @@ try {
   await page.type('form[aria-label="Account"] input[maxlength="100"]', 'Samantha')
   await page.click('form[aria-label="Account"] button.primary'); await sleep(400)
   t.eq('rename saved', await page.$eval('form[aria-label="Account"] .ok', (e) => e.textContent), 'Saved.')
+  // --- API tokens (same dialog)
+  await page.type('form[aria-label="Account"] input[aria-label="Token name"]', 'e2e-script')
+  await page.keyboard.press('Enter'); await page.waitForSelector('form[aria-label="Account"] .secret code')
+  const secret = await page.$eval('form[aria-label="Account"] .secret code', (e) => e.textContent.trim())
+  t.eq('token has the tst_ prefix', secret.startsWith('tst_'), true)
+  t.eq('token is listed', await page.$$eval('form[aria-label="Account"] .token-list .name', (els) => els.map((e) => e.textContent)), ['e2e-script'])
+  // Bearer requests are made from Node, not the page: the browser logs 4xx
+  // responses to the console and the harness treats those as errors.
+  const bearer = (path, init = {}) => fetch(trackstar.base + path, { ...init, headers: { Authorization: 'Bearer ' + secret, ...(init.headers ?? {}) } })
+  const viaBearer = await bearer('/api/me')
+  t.eq('bearer token authenticates as the owner', viaBearer.status === 200 ? (await viaBearer.json()).display_name : viaBearer.status, 'Samantha')
+  const mint = await bearer('/api/me/tokens', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'nope' }) })
+  t.eq('a token cannot mint tokens', mint.status, 403)
+  await page.click('form[aria-label="Account"] .token-list button'); await sleep(300)
+  t.eq('token revoked', await page.$$eval('form[aria-label="Account"] .token-list li', (els) => els.length), 0)
+  t.eq('revoked token is rejected', (await bearer('/api/me')).status, 401)
   await page.keyboard.press('Escape')
   t.eq('topbar shows the new name', await page.$eval('.menu > button', (e) => e.textContent.trim()), 'Samantha ▾')
 } finally {

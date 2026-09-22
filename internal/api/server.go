@@ -66,11 +66,17 @@ func (s *Server) Handler() http.Handler {
 	authed := func(pattern string, h func(http.ResponseWriter, *http.Request)) {
 		mux.Handle(pattern, s.requireUser(http.HandlerFunc(h)))
 	}
+	session := func(pattern string, h func(http.ResponseWriter, *http.Request)) {
+		mux.Handle(pattern, s.requireSession(http.HandlerFunc(h)))
+	}
 	authed("GET /api/me", s.handleMe)
-	authed("PATCH /api/me", s.handleUpdateMe)
+	session("PATCH /api/me", s.handleUpdateMe)
+	session("GET /api/me/tokens", s.handleListTokens)
+	session("POST /api/me/tokens", s.handleCreateToken)
+	session("DELETE /api/me/tokens/{id}", s.handleRevokeToken)
 	authed("GET /api/users", s.handleListUsers)
-	authed("PATCH /api/users/{id}", s.handleUpdateUser)
-	authed("POST /api/users/{id}/password", s.handleSetUserPassword)
+	session("PATCH /api/users/{id}", s.handleUpdateUser)
+	session("POST /api/users/{id}/password", s.handleSetUserPassword)
 	authed("GET /api/system/info", s.handleSystemInfo)
 
 	authed("GET /api/projects", s.handleListProjects)

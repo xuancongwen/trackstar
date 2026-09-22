@@ -1,5 +1,7 @@
 import type {
+  ApiToken,
   Comment,
+  CreatedToken,
   Epic,
   Iteration,
   Member,
@@ -56,6 +58,10 @@ export const api = {
   logout: () => request<void>('POST', '/api/auth/logout'),
   updateMe: (input: { display_name?: string; current_password?: string; new_password?: string }) =>
     request<User>('PATCH', '/api/me', input),
+  tokens: () => request<ApiToken[]>('GET', '/api/me/tokens'),
+  createToken: (name: string, expires_in_days = 0) =>
+    request<CreatedToken>('POST', '/api/me/tokens', { name, expires_in_days }),
+  revokeToken: (id: number) => request<void>('DELETE', `/api/me/tokens/${id}`),
   users: () => request<User[]>('GET', '/api/users'),
   updateUser: (id: number, input: { display_name?: string; is_admin?: boolean; is_active?: boolean }) =>
     request<User>('PATCH', `/api/users/${id}`, input),

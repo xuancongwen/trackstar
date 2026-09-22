@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"trackstar/internal/apperr"
 	"trackstar/internal/user"
 )
 
@@ -21,6 +22,7 @@ type ctxKey int
 const (
 	ctxRequestID ctxKey = iota
 	ctxUser
+	ctxBearer
 )
 
 func requestID(ctx context.Context) string {
@@ -31,6 +33,22 @@ func requestID(ctx context.Context) string {
 func currentUser(ctx context.Context) user.User {
 	u, _ := ctx.Value(ctxUser).(user.User)
 	return u
+}
+
+// viaBearer reports whether the request was authenticated with an API token
+// rather than a browser session.
+func viaBearer(ctx context.Context) bool {
+	b, _ := ctx.Value(ctxBearer).(bool)
+	return b
+}
+
+// bearerToken returns the API token from an Authorization header, or "".
+func bearerToken(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	if len(h) > 7 && strings.EqualFold(h[:7], "Bearer ") {
+		return strings.TrimSpace(h[7:])
+	}
+	return ""
 }
 
 type statusRecorder struct {
@@ -116,15 +134,43 @@ func (s *Server) checkOrigin(next http.Handler) http.Handler {
 	})
 }
 
+// requireUser authenticates the request: an Authorization: Bearer API token
+// wins over the session cookie, so a script never accidentally acts as
+// whoever is signed in to the browser on the same machine. Bearer requests
+// carry no password, so they bypass the login rate limiter; a miss is one
+// indexed lookup of an HMAC.
 func (s *Server) requireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u, err := s.Auth.Authenticate(r.Context(), sessionToken(r))
+		ctx := r.Context()
+		var (
+			u   user.User
+			err error
+		)
+		if tok := bearerToken(r); tok != "" {
+			u, err = s.Auth.AuthenticateToken(ctx, tok)
+			ctx = context.WithValue(ctx, ctxBearer, true)
+		} else {
+			u, err = s.Auth.Authenticate(ctx, sessionToken(r))
+		}
 		if err != nil {
 			s.fail(w, r, err)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxUser, u)))
+		next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, ctxUser, u)))
 	})
+}
+
+// requireSession is requireUser for account management: an API token may
+// not change passwords, manage accounts or mint further tokens, so a leaked
+// token is contained to the project data its owner can reach.
+func (s *Server) requireSession(next http.Handler) http.Handler {
+	return s.requireUser(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if viaBearer(r.Context()) {
+			s.fail(w, r, apperr.Forbidden("sign in with a browser session to manage accounts and tokens"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	}))
 }
 
 // clientIP returns the address of the real client. Forwarding headers are

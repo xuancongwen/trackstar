@@ -22,6 +22,19 @@ export interface User {
   is_active: boolean
 }
 
+/** A personal API token as listed; the secret is only in CreatedToken.token. */
+export interface ApiToken {
+  id: number
+  name: string
+  created_at: string
+  last_used_at: string | null
+  expires_at: string | null
+}
+
+export interface CreatedToken extends ApiToken {
+  token: string
+}
+
 export interface Project {
   id: number
   name: string
