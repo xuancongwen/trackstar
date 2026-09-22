@@ -14,6 +14,9 @@
     selectedId: number | null
     busyIds: Set<number>
     recentIds?: Set<number>
+    checkedIds?: Set<number>
+    epicNames?: Set<string>
+    readOnly?: boolean
     summary?: string
     /** Rendered above the sortable list (accepted stories, progress…). */
     top?: Snippet
@@ -27,6 +30,7 @@
     onopen: (story: Story) => void
     onaction: (story: Story, state: StoryState) => void
     onestimate: (story: Story, points: number) => void
+    ontoggle?: (story: Story) => void
   }
   let {
     section,
@@ -35,6 +39,9 @@
     selectedId,
     busyIds,
     recentIds = new Set(),
+    checkedIds = new Set(),
+    epicNames = new Set(),
+    readOnly = false,
     summary = '',
     top,
     dragDisabled = false,
@@ -46,6 +53,7 @@
     onopen,
     onaction,
     onestimate,
+    ontoggle,
   }: Props = $props()
 
   let storyCount = $derived(rows.filter((r) => r.kind === 'story').length)
@@ -55,7 +63,7 @@
   <header>
     <h2>{SECTION_TITLES[section]}</h2>
     <span class="summary">{summary}</span>
-    <button class="add" title={`Add story to ${SECTION_TITLES[section]}`} onclick={() => onadd(section)}>+</button>
+    {#if !readOnly}<button class="add" title={`Add story to ${SECTION_TITLES[section]}`} onclick={() => onadd(section)}>+</button>{/if}
   </header>
 
   <div class="scroll">
@@ -86,6 +94,10 @@
             selected={row.story.id === selectedId}
             busy={busyIds.has(row.story.id)}
             recent={recentIds.has(row.story.id)}
+            checked={checkedIds.has(row.story.id)}
+            {epicNames}
+            {readOnly}
+            {ontoggle}
             {onopen}
             {onaction}
             {onestimate}
@@ -94,7 +106,7 @@
       {/each}
       {#if storyCount === 0}
         <p class="hint muted" data-no-drag>
-          {dragDisabled ? 'No matching stories.' : 'Nothing here. Drag a story in or press +.'}
+          {dragDisabled ? 'No matching stories.' : readOnly ? 'Nothing here.' : 'Nothing here. Drag a story in or press +.'}
         </p>
       {/if}
     </div>

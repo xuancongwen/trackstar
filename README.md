@@ -55,6 +55,25 @@ you land on the board:
   renames) interleaved with its comments in the drawer.
 - Deleting a story moves it to the **Trash** for 30 days: undo from the toast,
   or restore from the Trash panel. Purge happens at startup, no worker.
+- **Epics** (`e` or the Epics button) are labels with a description and a
+  progress bar (accepted / total feature points); click one to filter the board
+  to it. Stories join an epic by carrying its label.
+- **Tasks** are a checklist inside a story (`☑ 2/5` on the row). **Blockers**
+  ("blocked by #12") show ⛔ on the row and a count in the Current header while
+  any blocker is unaccepted; they never prevent state changes.
+- **Filters** are evaluated instantly in the browser: free text plus
+  `owner:me`, `requester:kim`, `type:bug`, `state:started`, `estimate:3`,
+  `label:auth` / `epic:auth`, `is:blocked`, `is:unestimated`, `has:tasks`,
+  `-type:chore`, `"exact phrase"`. The ▾ next to the filter box has built-ins
+  (My work, Unestimated, Blocked, Bugs) and lets you save your own per project.
+- **Multi-select**: `x` or Shift-click marks rows; dragging a marked row moves
+  the whole set (in board order, one transaction); `Shift+I` / `B` / `C` sends
+  the selection to the end of Icebox / Backlog / Current.
+- **Done** shows an accepted-points-per-iteration chart with the velocity line
+  and pages through older iterations.
+- **Members** (Settings): a project with no members is open to everyone; add
+  members to make it members-only. Viewers can read but not change anything;
+  administrators always have access. Projects you cannot see are not listed.
 - Your name and password live under *your name ▸ Account*. Administrators get
   *Users*: rename, promote/demote, deactivate/reactivate, reset a password.
   Administrators can also **Reopen** an accepted story (it drops out of
@@ -63,10 +82,12 @@ you land on the board:
 | Key | Action |
 |---|---|
 | `c` | new story (in the selected story's panel; `Shift+Enter` saves and keeps the dialog open) |
+| `x` / Shift-click | add the row to the selection; `Shift+I` / `B` / `C` move the selection |
+| `e` | epics sidebar |
 | `j` / `k` (or ↓ / ↑) | move selection |
 | `h` / `l` (or ← / →) | switch panel |
 | `Enter` | open selected story |
-| `/` | search title + description |
+| `/` | filter box |
 | `Esc` | close dialog / drawer / search / selection |
 | `?` | shortcut help |
 
@@ -132,9 +153,16 @@ Design decisions worth knowing:
   the stream. Focus-refresh and a 5-minute poll remain as a safety net.
   The hub is single-process by design; a multi-instance PostgreSQL deployment
   would put `LISTEN/NOTIFY` behind the same two methods.
-- **Single team.** Every signed-in user sees every project (no organisations,
-  roles or per-project permissions). Only deleting a project and
-  `/api/system/info` are admin-only.
+- **Membership is opt-in.** A project with no members is open to every
+  signed-in user; adding the first member closes it to members (read/write),
+  viewers (read-only) and administrators. Hidden projects answer 404, so
+  membership does not leak which projects exist. Every handler checks access
+  through one helper (`internal/api/access.go`).
+- **Epics are labels** with `is_epic` set; progress is computed from live
+  stories at read time. Demoting an epic keeps the label on its stories.
+- **Filtering is client-side.** The board already holds every active story,
+  so the query language (`web/src/lib/filter.ts`) runs locally and instantly;
+  the server's `?q=` remains for API clients.
 
 ## Development setup
 
@@ -445,9 +473,14 @@ GET    /api/projects/:id  PATCH … DELETE …       (:id may be the numeric id 
 GET    /api/projects/:id/stories[?q=text | ?section=done | ?section=deleted]
 POST   /api/projects/:id/stories     {title, type?, estimate?, section?, description?, owner_id?, labels?}
 GET    /api/projects/:id/labels | /iterations | /velocity
+GET    /api/projects/:id/epics       POST … {name, description}     PATCH /api/epics/:id     DELETE /api/epics/:id (demotes to a label)
+GET    /api/projects/:id/members     PUT /api/projects/:id/members/:user {role: member|viewer}     DELETE …
+GET    /api/projects/:id/filters     POST … {name, query}           DELETE /api/filters/:id   (per user)
+POST   /api/stories/move             {ids, section, prev_id | next_id}   → {stories}   (ordered bulk move, one transaction)
+POST   /api/stories/:id/tasks {description}     PATCH /api/tasks/:id {description, done, position}     DELETE /api/tasks/:id
 GET    /api/projects/:id/events      text/event-stream; events "stories" and "project", data {project_id, story_id, client}
-GET    /api/stories/:id              (with comments and activity)
-PATCH  /api/stories/:id              {title, description, type, state, estimate|null, owner_id|null, requester_id, labels}
+GET    /api/stories/:id              (with comments, activity and tasks)
+PATCH  /api/stories/:id              {title, description, type, state, estimate|null, owner_id|null, requester_id, labels, blocked_by}
 DELETE /api/stories/:id              → the trashed story (soft delete, 30-day retention)
 POST   /api/stories/:id/restore
 POST   /api/stories/:id/move         {section, prev_id | next_id}   → {story, renormalized}
@@ -497,6 +530,8 @@ runtime plus the pure-Go SQLite engine; the page cache is capped at 8 MB.
 | `403 cross-origin request rejected` | The page's origin is neither `TRACKSTAR_PUBLIC_URL` nor the request's Host. Fix the public URL; make your reverse proxy pass `Host` through. |
 | Every request logs the proxy's IP | Add the proxy to `TRACKSTAR_TRUSTED_PROXIES`. |
 | `429` on login | 20 attempts per 5 minutes per client IP; wait, or restart the service. |
+| Cloudflare error 1016 (Origin DNS error) on the tunnel hostname | The zone's DNS record for the hostname does not point at the running tunnel (`CNAME <tunnel-uuid>.cfargotunnel.com`). Delete the record and re-add the public hostname in the tunnel's settings, which recreates it. |
+| A project disappeared from the list | It has members and you are not one; ask a member or an administrator (Settings ▸ Members). |
 | "this account has been deactivated" | An administrator deactivated the account; another admin can reactivate it under *Users*. |
 | Forgotten password | On the server: `sudo -u trackstar sh -c 'set -a; . /etc/trackstar/trackstar.env; exec trackstar reset-password you@example.com'` (reads the new password from stdin, revokes sessions). |
 | "registration is disabled" | `TRACKSTAR_ALLOW_REGISTRATION=false` and an account exists. Enable it briefly to add a teammate. |
@@ -510,9 +545,9 @@ runtime plus the pure-Go SQLite engine; the page cache is capped at 8 MB.
 
 ## Known limitations
 
-- Single team: every user sees every project; the only role is administrator.
-  No e-mail, so a forgotten password is reset by an administrator (*Users*) or
-  on the server (see Troubleshooting).
+- Permissions are deliberately simple: administrator, and per-project
+  member/viewer. No organisations. No e-mail, so a forgotten password is reset
+  by an administrator (*Users*) or on the server (see Troubleshooting).
 - Changing a project's iteration length or start weekday renumbers past
   iterations (they are derived, not stored).
 - Live updates are per process: running two instances behind one load
@@ -520,6 +555,6 @@ runtime plus the pure-Go SQLite engine; the page cache is capped at 8 MB.
 - Search is a substring match (`%` and `_` act as wildcards); no ranking.
 - Deleted stories are purged 30 days after deletion; there is no archive
   beyond that.
-- No attachments, epics, tasks, story blockers or notifications.
+- No attachments, sub-epics, or notifications. Blockers are informational.
 - PostgreSQL is designed for but not implemented.
 - The Svelte UI is desktop-first; on narrow screens the panels scroll sideways.

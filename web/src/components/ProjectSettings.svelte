@@ -1,14 +1,33 @@
 <script lang="ts">
   import { api } from '../lib/api'
   import { WEEKDAYS } from '../lib/format'
-  import type { Project } from '../lib/types'
+  import type { Member, Project, Role, User } from '../lib/types'
 
   interface Props {
     project: Project
+    users: User[]
+    members: Member[]
+    onmembers: (members: Member[]) => void
     onsaved: (project: Project) => void
     onclose: () => void
   }
-  let { project, onsaved, onclose }: Props = $props()
+  let { project, users, members, onmembers, onsaved, onclose }: Props = $props()
+
+  let memberError = $state('')
+  const roleOf = (userId: number): Role | '' => members.find((m) => m.user_id === userId)?.role ?? ''
+  async function setRole(userId: number, role: Role | '') {
+    memberError = ''
+    try {
+      if (role === '') {
+        await api.removeMember(project.id, userId)
+        onmembers(members.filter((m) => m.user_id !== userId))
+      } else {
+        onmembers(await api.setMember(project.id, userId, role))
+      }
+    } catch (err) {
+      memberError = (err as Error).message
+    }
+  }
 
   // svelte-ignore state_referenced_locally
   let form = $state({
@@ -60,6 +79,28 @@
       </label>
     </div>
     <p class="muted">Changing the iteration schedule renumbers past iterations; accepted stories keep their dates.</p>
+
+    <fieldset>
+      <legend>Members</legend>
+      <p class="muted">
+        {members.length === 0
+          ? 'No members: every signed-in user can see and edit this project. Add one to make it members-only.'
+          : 'Members-only. Viewers can read but not change anything; administrators always have access.'}
+      </p>
+      <div class="members">
+        {#each users.filter((u) => u.is_active || roleOf(u.id) !== '') as u (u.id)}
+          <label>
+            <span>{u.display_name}{u.is_admin ? ' (admin)' : ''}</span>
+            <select value={roleOf(u.id)} onchange={(e) => setRole(u.id, e.currentTarget.value as Role | '')}>
+              <option value="">—</option>
+              <option value="member">member</option>
+              <option value="viewer">viewer</option>
+            </select>
+          </label>
+        {/each}
+      </div>
+      {#if memberError}<p class="error" role="alert">{memberError}</p>{/if}
+    </fieldset>
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     <div class="row-actions">
       <button type="button" onclick={onclose}>Cancel</button>
@@ -76,6 +117,33 @@
   }
   p {
     margin: 0;
+    font-size: 12px;
+  }
+  fieldset {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px 10px;
+    display: grid;
+    gap: 6px;
+  }
+  legend {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .members {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px 12px;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .members label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
     font-size: 12px;
   }
 </style>

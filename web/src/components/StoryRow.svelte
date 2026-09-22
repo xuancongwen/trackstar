@@ -10,11 +10,31 @@
     busy?: boolean
     /** Just changed by someone else. */
     recent?: boolean
+    /** Part of a multi-selection. */
+    checked?: boolean
+    /** Names of labels that are epics (rendered differently). */
+    epicNames?: Set<string>
+    readOnly?: boolean
     onopen: (story: Story) => void
     onaction: (story: Story, state: StoryState) => void
     onestimate: (story: Story, points: number) => void
+    /** Shift-click: toggle membership in the multi-selection. */
+    ontoggle?: (story: Story) => void
   }
-  let { story, users, selected = false, busy = false, recent = false, onopen, onaction, onestimate }: Props = $props()
+  let {
+    story,
+    users,
+    selected = false,
+    busy = false,
+    recent = false,
+    checked = false,
+    epicNames = new Set(),
+    readOnly = false,
+    onopen,
+    onaction,
+    onestimate,
+    ontoggle,
+  }: Props = $props()
 
   const TYPE_GLYPH = { feature: '★', bug: '●', chore: '⚙' } as const
 
@@ -27,13 +47,15 @@
   class="story {story.state}"
   class:selected
   class:recent
-  class:locked={!canDrag(story)}
+  class:checked
+  class:locked={!canDrag(story) || readOnly}
   data-story-id={story.id}
-  data-no-drag={canDrag(story) ? undefined : ''}
+  data-no-drag={canDrag(story) && !readOnly ? undefined : ''}
   role="button"
   tabindex="-1"
   aria-label={story.title}
-  onclick={() => onopen(story)}
+  aria-pressed={checked}
+  onclick={(e) => (e.shiftKey && ontoggle ? ontoggle(story) : onopen(story))}
 >
   <span class="grip" aria-hidden="true">{canDrag(story) ? '⠿' : '✓'}</span>
   <div class="body">
@@ -46,16 +68,24 @@
         · <span class="state-name">{story.state}</span>
       {/if}
       {#if story.comment_count > 0}· <span title="comments">💬 {story.comment_count}</span>{/if}
-      {#each story.labels as label (label)}<span class="label">{label}</span>{/each}
+      {#if story.task_count > 0}
+        · <span class="tasks" class:all-done={story.tasks_done === story.task_count} title="tasks done">☑ {story.tasks_done}/{story.task_count}</span>
+      {/if}
+      {#each story.labels as label (label)}<span class="label" class:epic={epicNames.has(label)}>{label}</span>{/each}
     </div>
   </div>
 
   <div class="side">
+    {#if story.blocked}
+      <span class="blocked" title={`Blocked by ${story.blocked_by.map((id) => '#' + id).join(', ')}`}>⛔</span>
+    {/if}
     {#if story.estimate !== null}
       <span class="points" title="estimate">{story.estimate}</span>
     {/if}
     {#if owner}<span class="owner" title={owner.display_name}>{initials(owner.display_name)}</span>{/if}
-    {#if needsEstimate(story) && story.state !== 'accepted'}
+    {#if readOnly}
+      <!-- viewers get no actions -->
+    {:else if needsEstimate(story) && story.state !== 'accepted'}
       <span class="estimates" role="group" aria-label="Estimate">
         {#each ESTIMATES as pts (pts)}
           <button
@@ -119,6 +149,22 @@
     from {
       background: color-mix(in srgb, var(--accent) 35%, var(--row));
     }
+  }
+  .story.checked {
+    background: color-mix(in srgb, var(--accent) 18%, var(--row));
+  }
+  .story.checked .grip {
+    color: var(--accent);
+  }
+  .blocked {
+    font-size: 11px;
+  }
+  .tasks.all-done {
+    color: var(--accept);
+  }
+  .label.epic {
+    color: var(--epic);
+    font-weight: 600;
   }
   .story.selected {
     border-left-color: var(--accent);

@@ -1,6 +1,11 @@
 import type {
   Comment,
+  Epic,
   Iteration,
+  Member,
+  Role,
+  SavedFilter,
+  Task,
   MoveRequest,
   MoveResult,
   NewStory,
@@ -77,11 +82,34 @@ export const api = {
   deleteStory: (id: number) => request<Story>('DELETE', `/api/stories/${id}`),
   restoreStory: (id: number) => request<Story>('POST', `/api/stories/${id}/restore`),
   moveStory: (id: number, move: MoveRequest) => request<MoveResult>('POST', `/api/stories/${id}/move`, move),
+  moveStories: (ids: number[], move: MoveRequest) =>
+    request<{ stories: Story[] }>('POST', '/api/stories/move', { ids, ...move }),
   addComment: (storyId: number, body: string) =>
     request<Comment>('POST', `/api/stories/${storyId}/comments`, { body }),
   deleteComment: (id: number) => request<void>('DELETE', `/api/comments/${id}`),
 
   labels: (projectId: number) => request<string[]>('GET', `/api/projects/${projectId}/labels`),
+
+  epics: (projectId: number) => request<Epic[]>('GET', `/api/projects/${projectId}/epics`),
+  createEpic: (projectId: number, input: { name: string; description?: string }) =>
+    request<Epic>('POST', `/api/projects/${projectId}/epics`, input),
+  updateEpic: (id: number, input: { name?: string; description?: string }) => request<Epic>('PATCH', `/api/epics/${id}`, input),
+  demoteEpic: (id: number) => request<void>('DELETE', `/api/epics/${id}`),
+
+  addTask: (storyId: number, description: string) => request<Task>('POST', `/api/stories/${storyId}/tasks`, { description }),
+  updateTask: (id: number, input: { description?: string; done?: boolean; position?: number }) =>
+    request<Task>('PATCH', `/api/tasks/${id}`, input),
+  deleteTask: (id: number) => request<void>('DELETE', `/api/tasks/${id}`),
+
+  filters: (projectId: number) => request<SavedFilter[]>('GET', `/api/projects/${projectId}/filters`),
+  saveFilter: (projectId: number, name: string, query: string) =>
+    request<SavedFilter>('POST', `/api/projects/${projectId}/filters`, { name, query }),
+  deleteFilter: (id: number) => request<void>('DELETE', `/api/filters/${id}`),
+
+  members: (projectId: number) => request<Member[]>('GET', `/api/projects/${projectId}/members`),
+  setMember: (projectId: number, userId: number, role: Role) =>
+    request<Member[]>('PUT', `/api/projects/${projectId}/members/${userId}`, { role }),
+  removeMember: (projectId: number, userId: number) => request<void>('DELETE', `/api/projects/${projectId}/members/${userId}`),
   iterations: (projectId: number) => request<Iteration[]>('GET', `/api/projects/${projectId}/iterations`),
   velocity: (projectId: number) => request<Velocity>('GET', `/api/projects/${projectId}/velocity`),
 }

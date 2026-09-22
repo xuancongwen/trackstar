@@ -159,3 +159,23 @@ export function projectBacklog(
   }
   return rows
 }
+
+/**
+ * Ids of the checked stories in board order (icebox, backlog, current; each
+ * by position), so a bulk move keeps their relative order.
+ */
+export function orderedSelection(stories: Story[], checked: Set<number>): number[] {
+  const out: number[] = []
+  for (const section of ['icebox', 'backlog', 'current'] as const) {
+    for (const s of sectionStories(stories, section)) if (checked.has(s.id)) out.push(s.id)
+  }
+  return out
+}
+
+/** Bulk version of moveRequest: the target list minus every moved story. */
+export function bulkMoveRequest(orderedIds: number[], movedIds: number[], section: DropSection, newIndex: number): MoveRequest {
+  const moving = new Set(movedIds)
+  const ids = orderedIds.filter((id) => !moving.has(id))
+  const index = Math.max(0, Math.min(newIndex, ids.length))
+  return { section, prev_id: ids[index - 1] ?? null, next_id: ids[index] ?? null }
+}

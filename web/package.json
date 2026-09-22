@@ -8,7 +8,7 @@
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "e2e": "node e2e/board.mjs && node e2e/live.mjs"
+    "e2e": "node e2e/board.mjs && node e2e/live.mjs && node e2e/planning.mjs"
   },
   "dependencies": {
     "sortablejs": "^1.15.7"

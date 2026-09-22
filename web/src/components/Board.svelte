@@ -4,19 +4,24 @@
   import {
     acceptedThisIteration,
     applyMove,
+    bulkMoveRequest,
     canDrop,
     moveRequest,
+    orderedSelection,
     projectBacklog,
     sectionStories,
     totalPoints,
     type BacklogRow,
   } from '../lib/board'
   import type { DropEvent } from '../lib/dragdrop'
+  import { blockingSet, matches as matchesFilter, parseQuery } from '../lib/filter'
   import { connectLive, type LiveStatus } from '../lib/live'
   import { formatRange } from '../lib/format'
-  import type { DropSection, Iteration, NewStory, Project, Story, StoryPatch, StoryState, User, Velocity } from '../lib/types'
+  import type { DropSection, Epic, Iteration, Member, NewStory, Project, SavedFilter, Story, StoryPatch, StoryState, User, Velocity } from '../lib/types'
   import AccountDialog from './AccountDialog.svelte'
   import DonePanel from './DonePanel.svelte'
+  import EpicsPanel from './EpicsPanel.svelte'
+  import FilterBar from './FilterBar.svelte'
   import TrashPanel from './TrashPanel.svelte'
   import UsersDialog from './UsersDialog.svelte'
   import Panel from './Panel.svelte'
@@ -51,6 +56,13 @@
   let showSettings = $state(false)
   let showDone = $state(false)
   let showTrash = $state(false)
+  let showEpics = $state(false)
+  let epics = $state<Epic[]>([])
+  let activeEpic = $state<string | null>(null)
+  let savedFilters = $state<SavedFilter[]>([])
+  let members = $state<Member[]>([])
+  // Multi-selection for bulk moves (x / shift-click).
+  let checked = $state(new Set<number>())
   let trashStories = $state<Story[]>([])
   let showAccount = $state(false)
   let showUsers = $state(false)
@@ -59,7 +71,6 @@
   let recentIds = $state(new Set<number>())
   let showHelp = $state(false)
   let query = $state('')
-  let matches = $state<Set<number> | null>(null)
   let busyIds = $state(new Set<number>())
   let dragging = $state(false)
   let liveStatus = $state<LiveStatus>('connecting')
@@ -74,7 +85,13 @@
 
   let users = $derived(new Map(userList.map((u) => [u.id, u])))
   let currentIteration = $derived(iterations.find((it) => it.current) ?? null)
-  let visible = (s: Story) => matches === null || matches.has(s.id)
+  let readOnly = $derived(project?.can_write === false)
+  let epicNames = $derived(new Set(epics.map((e) => e.name)))
+  // The active filter: typed query plus the selected epic, evaluated locally.
+  let terms = $derived(parseQuery(query + (activeEpic ? ` label:"${activeEpic}"` : '')))
+  let filterCtx = $derived({ me: user, users, blocking: blockingSet(stories) })
+  let filtering = $derived(terms.length > 0)
+  let visible = $derived((s: Story) => !filtering || matchesFilter(s, terms, filterCtx))
   let lists = $derived({
     icebox: sectionStories(stories, 'icebox').filter(visible),
     backlog: sectionStories(stories, 'backlog').filter(visible),
@@ -95,19 +112,20 @@
     icebox: storyRows(lists.icebox),
     // Projection markers only make sense for the complete, unfiltered backlog.
     backlog:
-      matches === null && project && velocity && currentIteration
+      !filtering && project && velocity && currentIteration
         ? projectBacklog(lists.backlog, velocity.velocity, currentIteration, project.iteration_length_days)
         : storyRows(lists.backlog),
     current: storyRows(lists.current),
   })
 
   let currentTotal = $derived(totalPoints(lists.current) + totalPoints(accepted))
+  let blockedInCurrent = $derived(lists.current.filter((s) => s.blocked).length)
   let summaries = $derived({
     icebox: `${lists.icebox.length} stories`,
     backlog: `${totalPoints(lists.backlog)} pts · ${lists.backlog.length} stories`,
-    current: currentIteration
-      ? `#${currentIteration.number} · ${formatRange(currentIteration.start_at, currentIteration.end_at)}`
-      : '',
+    current:
+      (currentIteration ? `#${currentIteration.number} · ${formatRange(currentIteration.start_at, currentIteration.end_at)}` : '') +
+      (blockedInCurrent ? ` · ⛔ ${blockedInCurrent} blocked` : ''),
   })
 
   function fail(err: unknown) {
@@ -125,7 +143,10 @@
 
   async function loadMeta() {
     if (!project) return
-    ;[velocity, iterations] = await Promise.all([api.velocity(project.id), api.iterations(project.id)])
+    ;[velocity, iterations, epics] = await Promise.all([api.velocity(project.id), api.iterations(project.id), api.epics(project.id)])
+  }
+  async function loadEpics() {
+    if (project) epics = await api.epics(project.id).catch((err) => (fail(err), epics))
   }
 
   async function refresh() {
@@ -168,6 +189,7 @@
         document.title = `${project.name} · Trackstar`
         userList = await api.users()
         await refresh()
+        ;[savedFilters, members] = await Promise.all([api.filters(project.id), api.members(project.id)])
         live = connectLive({ projectId: project.id, onChange: refreshWhenIdle, onStatus: (st) => (liveStatus = st) })
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) onunauthorized()
@@ -219,6 +241,10 @@
   }
 
   async function onDrop(event: DropEvent) {
+    if (checked.has(event.storyId) && checked.size > 1) {
+      const ids = orderedSelection(stories, checked)
+      return bulkMove(ids, bulkMoveRequest(lists[event.to].map((s) => s.id), ids, event.to, event.index))
+    }
     const request = moveRequest(
       lists[event.to].map((s) => s.id),
       event.storyId,
@@ -231,6 +257,38 @@
     if (!result) return
     replaceStory(result.story)
     if (result.renormalized) await loadStories().catch(fail)
+  }
+
+  // Moves several stories in one request; the list is reloaded because many
+  // rows (and possibly the rebalanced section) changed.
+  async function bulkMove(ids: number[], request: ReturnType<typeof bulkMoveRequest>) {
+    if (ids.length === 0) return
+    if (ids.some((id) => !mayDrop(id, request.section))) {
+      toast = `Some selected stories cannot move to ${request.section}`
+      setTimeout(() => (toast = ''), 4000)
+      return
+    }
+    busyIds = new Set([...busyIds, ...ids])
+    try {
+      await api.moveStories(ids, request)
+      await loadStories()
+      checked = new Set()
+    } catch (err) {
+      fail(err)
+      await loadStories().catch(() => {})
+    } finally {
+      const next = new Set(busyIds)
+      for (const id of ids) next.delete(id)
+      busyIds = next
+    }
+  }
+
+  function toggleChecked(id: number) {
+    const next = new Set(checked)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    checked = next
+    selectedId = id
   }
 
   async function createStory(input: NewStory, keepOpen: boolean) {
@@ -270,23 +328,9 @@
     if (s) replaceStory({ ...s, comment_count: Math.max(0, s.comment_count + delta) })
   }
 
-  let searchTimer: ReturnType<typeof setTimeout>
-  function onSearchInput() {
-    clearTimeout(searchTimer)
-    searchTimer = setTimeout(runSearch, 200)
-  }
-  async function runSearch() {
-    const q = query.trim()
-    if (!project || q === '') {
-      matches = null
-      return
-    }
-    try {
-      const found = await api.stories(project.id, { q })
-      if (q === query.trim()) matches = new Set(found.map((s) => s.id))
-    } catch (err) {
-      fail(err)
-    }
+  async function toggleEpics() {
+    showEpics = !showEpics
+    if (showEpics) await loadEpics()
   }
 
   async function toggleDone() {
@@ -344,9 +388,10 @@
     else if (showSettings) showSettings = false
     else if (showHelp) showHelp = false
     else if (openId !== null) openId = null
-    else if (query) {
+    else if (checked.size > 0) checked = new Set()
+    else if (query || activeEpic) {
       query = ''
-      matches = null
+      activeEpic = null
     } else if (selectedId !== null) selectedId = null
     else return false
     return true
@@ -363,9 +408,25 @@
     if (typing || event.ctrlKey || event.metaKey || event.altKey || creating || showSettings || showAccount || showUsers) return
 
     const selected = stories.find((s) => s.id === selectedId)
+    // Shift+I / B / C: move the selection (or the focused story) to the end of a section.
+    if (event.shiftKey && !readOnly && (event.key === 'I' || event.key === 'B' || event.key === 'C')) {
+      const section = ({ I: 'icebox', B: 'backlog', C: 'current' } as const)[event.key]
+      const ids = checked.size > 0 ? orderedSelection(stories, checked) : selectedId !== null ? [selectedId] : []
+      const target = lists[section].map((s) => s.id).filter((id) => !ids.includes(id))
+      bulkMove(ids, { section, prev_id: target.at(-1) ?? null, next_id: null })
+      event.preventDefault()
+      return
+    }
     switch (event.key) {
       case 'c':
+        if (readOnly) return
         creating = selected && selected.section !== 'done' ? selected.section : 'icebox'
+        break
+      case 'x':
+        if (selectedId !== null && !readOnly) toggleChecked(selectedId)
+        break
+      case 'e':
+        toggleEpics()
         break
       case 'j':
       case 'ArrowDown':
@@ -403,9 +464,13 @@
     selectedId = story.id
     openId = story.id
   }
-  const act = (story: Story, state: StoryState) => patchStory(story.id, { state })
+  const act = (story: Story, state: StoryState) => {
+    if (readOnly) return
+    patchStory(story.id, { state })
+  }
   const estimate = (story: Story, points: number) => patchStory(story.id, { estimate: points })
   const mayDrop = (id: number, target: DropSection) => {
+    if (readOnly) return false
     const story = stories.find((s) => s.id === id)
     return story !== undefined && canDrop(story, target)
   }
@@ -427,14 +492,21 @@
           Velocity <b>{velocity.velocity}</b>{velocity.estimated ? '*' : ''}
         </span>
       {/if}
-      <input
-        class="search"
-        type="search"
-        placeholder="Search stories  ( / )"
-        bind:this={searchInput}
-        bind:value={query}
-        oninput={onSearchInput}
+      <FilterBar
+        projectId={project.id}
+        {query}
+        saved={savedFilters}
+        onquery={(q) => (query = q)}
+        onsavedchanged={(f) => (savedFilters = f)}
+        oninput={(el) => (searchInput = el)}
       />
+      {#if activeEpic}
+        <button class="chip" onclick={() => (activeEpic = null)} title="Clear epic filter">epic: {activeEpic} ✕</button>
+      {/if}
+      {#if checked.size > 0}
+        <span class="chip selection" title="Shift+I / B / C moves the selection; Esc clears">{checked.size} selected</span>
+      {/if}
+      {#if readOnly}<span class="chip">read-only</span>{/if}
       <span class="spacer"></span>
       <span
         class="live {liveStatus}"
@@ -444,9 +516,10 @@
             ? 'Connection lost — reconnecting'
             : 'Connecting…'}>●</span
       >
+      <button class:on={showEpics} onclick={toggleEpics} title="Epics (e)">Epics</button>
       <button class:on={showDone} onclick={toggleDone}>Done</button>
       <button class:on={showTrash} onclick={toggleTrash} title="Deleted stories">Trash</button>
-      <button onclick={() => (creating = 'icebox')} title="New story (c)">+ Story</button>
+      {#if !readOnly}<button onclick={() => (creating = 'icebox')} title="New story (c)">+ Story</button>{/if}
       <button onclick={() => (showSettings = true)}>Settings</button>
       <button onclick={() => (showHelp = !showHelp)} title="Keyboard shortcuts (?)">?</button>
       <div class="menu">
@@ -467,9 +540,15 @@
       </div>
     </header>
 
-    <main class="panels" style:grid-template-columns={`repeat(${3 + Number(showDone) + Number(showTrash)}, minmax(0, 1fr))`}>
+    <main
+      class="panels"
+      style:grid-template-columns={`${showEpics ? 'minmax(0, 0.7fr) ' : ''}repeat(${3 + Number(showDone) + Number(showTrash)}, minmax(0, 1fr))`}
+    >
+      {#if showEpics}
+        <EpicsPanel projectId={project.id} {epics} active={activeEpic} canWrite={!readOnly} onchanged={loadEpics} onselect={(n) => (activeEpic = n)} />
+      {/if}
       {#if showDone}
-        <DonePanel {iterations} stories={doneStories} {users} {selectedId} onopen={openStoryRow} />
+        <DonePanel {iterations} stories={doneStories} {users} {selectedId} velocity={velocity?.velocity ?? null} onopen={openStoryRow} />
       {/if}
       {#if showTrash}
         <TrashPanel stories={trashStories} onrestore={(s) => restoreStory(s.id)} onopen={openStoryRow} />
@@ -482,8 +561,11 @@
           {selectedId}
           {busyIds}
           {recentIds}
+          checkedIds={checked}
+          {epicNames}
+          {readOnly}
           summary={summaries[section]}
-          dragDisabled={matches !== null}
+          dragDisabled={filtering || readOnly}
           {dragging}
           canDrop={mayDrop}
           ondrop={onDrop}
@@ -492,6 +574,7 @@
           onopen={openStoryRow}
           onaction={act}
           onestimate={estimate}
+          ontoggle={(s) => toggleChecked(s.id)}
           top={section === 'current' ? currentTop : undefined}
         />
       {/each}
@@ -506,7 +589,7 @@
       </div>
     {/if}
     {#each accepted as story (story.id)}
-      <StoryRow {story} {users} selected={story.id === selectedId} onopen={openStoryRow} onaction={act} onestimate={estimate} />
+      <StoryRow {story} {users} {epicNames} {readOnly} selected={story.id === selectedId} onopen={openStoryRow} onaction={act} onestimate={estimate} />
     {/each}
   {/snippet}
 
@@ -515,6 +598,8 @@
       story={openStory}
       {users}
       me={user}
+      {stories}
+      {readOnly}
       onpatch={patchStory}
       ondelete={deleteStory}
       onrestore={restoreStory}
@@ -528,6 +613,9 @@
   {#if showSettings}
     <ProjectSettings
       {project}
+      users={userList}
+      {members}
+      onmembers={(m) => (members = m)}
       onclose={() => (showSettings = false)}
       onsaved={(p) => {
         project = p
@@ -544,8 +632,9 @@
   {/if}
   {#if showHelp}
     <div class="help" role="note">
-      <kbd>c</kbd> new story · <kbd>j</kbd>/<kbd>k</kbd> move selection · <kbd>h</kbd>/<kbd>l</kbd> switch panel ·
-      <kbd>Enter</kbd> open · <kbd>/</kbd> search · <kbd>Esc</kbd> close
+      <kbd>c</kbd> new story · <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>h</kbd>/<kbd>l</kbd> switch panel · <kbd>Enter</kbd> open ·
+      <kbd>x</kbd> / <kbd>Shift</kbd>-click select · <kbd>Shift</kbd>+<kbd>I</kbd>/<kbd>B</kbd>/<kbd>C</kbd> move selection to Icebox/Backlog/Current ·
+      <kbd>e</kbd> epics · <kbd>/</kbd> filter · <kbd>Esc</kbd> close
     </div>
   {/if}
   {#if toast}<div class="toast" role="alert">{toast}</div>{/if}
@@ -608,10 +697,18 @@
     font-size: 12px;
     white-space: nowrap;
   }
-  .search {
-    width: min(260px, 30vw);
-    padding: 2px 8px;
-    color: var(--text);
+  .chip {
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.14);
+    font-size: 12px;
+    white-space: nowrap;
+    border: 0;
+    color: inherit;
+  }
+  .chip.selection {
+    background: var(--accent);
+    color: var(--accent-text);
   }
   .spacer {
     flex: 1;

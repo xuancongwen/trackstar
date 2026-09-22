@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   acceptedThisIteration,
   applyMove,
+  bulkMoveRequest,
+  orderedSelection,
   canDrop,
   moveRequest,
   nextActions,
@@ -151,5 +153,25 @@ describe('projectBacklog', () => {
     expect(projectBacklog([], 10, current, 7)).toEqual([])
     const rows = projectBacklog([makeStory({ estimate: 1 }), makeStory({ estimate: 1 })], 0, current, 7)
     expect(rows.filter((r) => r.kind === 'marker')).toHaveLength(2)
+  })
+})
+
+describe('bulk selection', () => {
+  it('orders the selection by board position across sections', () => {
+    const stories = [
+      makeStory({ id: 1, section: 'backlog', position: 300 }),
+      makeStory({ id: 2, section: 'backlog', position: 100 }),
+      makeStory({ id: 3, section: 'icebox', state: 'icebox', position: 50 }),
+      makeStory({ id: 4, section: 'current', state: 'unstarted', position: 10 }),
+    ]
+    expect(orderedSelection(stories, new Set([1, 2, 3, 4]))).toEqual([3, 2, 1, 4])
+    expect(orderedSelection(stories, new Set([1]))).toEqual([1])
+  })
+
+  it('computes the drop neighbours without the moved stories', () => {
+    // list [1,2,3,4,5]; moving 2 and 4 to index 1 (between 1 and 3 in the reduced list)
+    expect(bulkMoveRequest([1, 2, 3, 4, 5], [2, 4], 'backlog', 1)).toEqual({ section: 'backlog', prev_id: 1, next_id: 3 })
+    expect(bulkMoveRequest([1, 2, 3], [1, 2, 3], 'icebox', 0)).toEqual({ section: 'icebox', prev_id: null, next_id: null })
+    expect(bulkMoveRequest([1, 2, 3], [2], 'backlog', 99)).toEqual({ section: 'backlog', prev_id: 3, next_id: null })
   })
 })

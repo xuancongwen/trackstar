@@ -2,6 +2,7 @@
   import { formatRange } from '../lib/format'
   import { totalPoints } from '../lib/board'
   import type { Iteration, Story, StoryState, User } from '../lib/types'
+  import IterationChart from './IterationChart.svelte'
   import StoryRow from './StoryRow.svelte'
 
   interface Props {
@@ -9,15 +10,19 @@
     stories: Story[]
     users: Map<number, User>
     selectedId: number | null
+    velocity: number | null
     onopen: (story: Story) => void
   }
-  let { iterations, stories, users, selectedId, onopen }: Props = $props()
+  let { iterations, stories, users, selectedId, velocity, onopen }: Props = $props()
+
+  const PAGE = 5
+  let shown = $state(PAGE)
 
   // Completed iterations, newest first, each with the stories accepted in it.
+  let completed = $derived(iterations.filter((it) => !it.current).reverse())
   let groups = $derived(
-    iterations
-      .filter((it) => !it.current)
-      .reverse()
+    completed
+      .slice(0, shown)
       .map((it) => ({
         iteration: it,
         stories: stories.filter((s) => s.accepted_at !== null && s.accepted_at >= it.start_at && s.accepted_at < it.end_at),
@@ -33,6 +38,7 @@
     <span class="summary">{totalPoints(stories)} pts · {stories.length} stories</span>
   </header>
   <div class="scroll">
+    <IterationChart {iterations} {velocity} />
     {#each groups as group (group.iteration.number)}
       <div class="marker">
         <span>Iteration {group.iteration.number} · {formatRange(group.iteration.start_at, group.iteration.end_at)}</span>
@@ -44,6 +50,9 @@
     {:else}
       <p class="muted">No completed iterations yet.</p>
     {/each}
+    {#if completed.length > shown}
+      <p><button onclick={() => (shown += PAGE)}>Show {Math.min(PAGE, completed.length - shown)} older iterations</button></p>
+    {/if}
   </div>
 </section>
 

@@ -30,6 +30,43 @@ export interface Project {
   iteration_length_days: number
   iteration_start_weekday: number
   velocity_window: number
+  /** Present on GET /api/projects/:id: whether the caller may change things. */
+  can_write?: boolean
+}
+
+export type Role = 'member' | 'viewer'
+
+export interface Member {
+  user_id: number
+  role: Role
+}
+
+export interface Epic {
+  id: number
+  project_id: number
+  name: string
+  description: string
+  total_points: number
+  accepted_points: number
+  story_count: number
+  accepted_count: number
+}
+
+export interface Task {
+  id: number
+  story_id: number
+  description: string
+  done: boolean
+  position: number
+  created_at: string
+}
+
+export interface SavedFilter {
+  id: number
+  project_id: number
+  name: string
+  query: string
+  created_at: string
 }
 
 export interface Story {
@@ -46,6 +83,10 @@ export interface Story {
   owner_id: number | null
   labels: string[]
   comment_count: number
+  task_count: number
+  tasks_done: number
+  blocked_by: number[]
+  blocked: boolean
   created_at: string
   updated_at: string
   accepted_at: string | null
@@ -73,6 +114,7 @@ export interface Comment {
 export interface StoryDetail extends Story {
   comments: Comment[]
   activity: Activity[]
+  tasks: Task[]
 }
 
 export interface Iteration {
@@ -104,7 +146,7 @@ export interface MoveResult {
 }
 
 export type StoryPatch = Partial<
-  Pick<Story, 'title' | 'description' | 'type' | 'state' | 'estimate' | 'owner_id' | 'requester_id' | 'labels'>
+  Pick<Story, 'title' | 'description' | 'type' | 'state' | 'estimate' | 'owner_id' | 'requester_id' | 'labels' | 'blocked_by'>
 >
 
 export interface NewStory {
