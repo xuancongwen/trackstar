@@ -204,6 +204,31 @@ kbd {
   color: var(--accent-text);
 }
 
+@media (pointer: coarse) {
+  button {
+    min-height: 32px;
+  }
+  input:not([type='checkbox']),
+  select {
+    min-height: 34px;
+  }
+  .estimates button {
+    min-height: 28px;
+    min-width: 28px;
+  }
+}
+
+@media (max-width: 600px) {
+  .backdrop {
+    padding-top: 4vh;
+    align-items: start;
+  }
+  .modal {
+    max-height: 92vh;
+    overflow-y: auto;
+  }
+}
+
 .drag-ghost {
   opacity: 0.35;
 }

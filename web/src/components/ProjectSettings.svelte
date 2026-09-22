@@ -132,6 +132,12 @@
     letter-spacing: 0.04em;
     color: var(--muted);
   }
+  @media (max-width: 600px) {
+    .grid,
+    .members {
+      grid-template-columns: 1fr !important;
+    }
+  }
   .members {
     display: grid;
     grid-template-columns: repeat(2, 1fr);

@@ -39,6 +39,10 @@ export function sortableList(el: HTMLElement, options: SortableListOptions) {
     filter: '[data-no-drag], button, select, input, textarea, a',
     preventOnFilter: false,
     animation: 120,
+    // On touch screens a short hold starts the drag; a quick swipe scrolls.
+    delay: 180,
+    delayOnTouchOnly: true,
+    touchStartThreshold: 4,
     ghostClass: 'drag-ghost',
     chosenClass: 'drag-chosen',
     forceFallback: false,

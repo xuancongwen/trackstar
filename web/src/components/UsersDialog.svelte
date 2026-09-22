@@ -46,6 +46,7 @@
       Deactivated users cannot sign in but stay attached to their stories. New accounts are created by
       registration (TRACKSTAR_ALLOW_REGISTRATION).
     </p>
+    <div class="table-scroll">
     <table>
       <thead>
         <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr>
@@ -87,6 +88,7 @@
         {/each}
       </tbody>
     </table>
+    </div>
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     {#if notice}<p class="ok" role="status">{notice}</p>{/if}
     <div class="row-actions"><button onclick={onclose}>Close</button></div>
@@ -101,8 +103,12 @@
     margin: 0;
     font-size: 12px;
   }
+  .table-scroll {
+    overflow-x: auto;
+  }
   table {
     width: 100%;
+    min-width: 520px;
     border-collapse: collapse;
     font-size: 12px;
   }

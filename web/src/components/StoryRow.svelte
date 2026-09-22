@@ -150,6 +150,17 @@
       background: color-mix(in srgb, var(--accent) 35%, var(--row));
     }
   }
+  @media (max-width: 600px) {
+    .story {
+      padding: 7px 6px 7px 2px;
+    }
+    .title {
+      white-space: normal;
+    }
+    .meta {
+      white-space: normal;
+    }
+  }
   .story.checked {
     background: color-mix(in srgb, var(--accent) 18%, var(--row));
   }

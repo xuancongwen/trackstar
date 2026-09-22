@@ -63,6 +63,10 @@
   let members = $state<Member[]>([])
   // Multi-selection for bulk moves (x / shift-click).
   let checked = $state(new Set<number>())
+  // Phone layout: one panel at a time, chosen with the tab strip.
+  let mobile = $state(false)
+  type MobileTab = DropSection | 'done' | 'trash' | 'epics'
+  let mobileTab = $state<MobileTab>('current')
   let trashStories = $state<Story[]>([])
   let showAccount = $state(false)
   let showUsers = $state(false)
@@ -183,6 +187,10 @@
 
   onMount(() => {
     let live: ReturnType<typeof connectLive> | undefined
+    const mq = window.matchMedia('(max-width: 900px)')
+    const onMq = () => (mobile = mq.matches)
+    onMq()
+    mq.addEventListener('change', onMq)
     ;(async () => {
       try {
         project = await api.project(slug)
@@ -205,6 +213,7 @@
     document.addEventListener('visibilitychange', tick)
     return () => {
       live?.close()
+      mq.removeEventListener('change', onMq)
       clearInterval(timer)
       document.removeEventListener('visibilitychange', tick)
       document.title = 'Trackstar'
@@ -343,6 +352,27 @@
     if (showTrash && project) trashStories = await api.stories(project.id, { deleted: true }).catch((err) => (fail(err), []))
   }
 
+  async function selectTab(tab: MobileTab) {
+    mobileTab = tab
+    if (!project) return
+    if (tab === 'done') doneStories = await api.stories(project.id, { done: true }).catch((err) => (fail(err), doneStories))
+    if (tab === 'trash') trashStories = await api.stories(project.id, { deleted: true }).catch((err) => (fail(err), trashStories))
+    if (tab === 'epics') await loadEpics()
+  }
+  // Which panels the data loaders keep fresh: on a phone, the visible tab.
+  $effect(() => {
+    if (mobile) {
+      showDone = mobileTab === 'done'
+      showTrash = mobileTab === 'trash'
+    }
+  })
+
+  // "Move to" from the drawer: append to a section (the phone has no cross-panel drag).
+  function moveToSection(id: number, section: DropSection) {
+    const target = lists[section].map((s) => s.id).filter((x) => x !== id)
+    bulkMove([id], { section, prev_id: target.at(-1) ?? null, next_id: null })
+  }
+
   async function reloadUsers() {
     userList = await api.users().catch((err) => (fail(err), userList))
   }
@@ -420,7 +450,7 @@
     switch (event.key) {
       case 'c':
         if (readOnly) return
-        creating = selected && selected.section !== 'done' ? selected.section : 'icebox'
+        creating = creatingSection()
         break
       case 'x':
         if (selectedId !== null && !readOnly) toggleChecked(selectedId)
@@ -464,6 +494,11 @@
     selectedId = story.id
     openId = story.id
   }
+  const creatingSection = (): DropSection => {
+    if (mobile && (mobileTab === 'icebox' || mobileTab === 'backlog' || mobileTab === 'current')) return mobileTab
+    const selected = stories.find((s) => s.id === selectedId)
+    return selected && selected.section !== 'done' ? selected.section : 'icebox'
+  }
   const act = (story: Story, state: StoryState) => {
     if (readOnly) return
     patchStory(story.id, { state })
@@ -482,9 +517,9 @@
   <p class="load-error error">{loadError} — <a href="#/">back to projects</a></p>
 {:else if project}
   <div class="board">
-    <header class="topbar">
+    <header class="topbar" class:mobile>
       <a href="#/" class="home" title="All projects">Trackstar</a>
-      <strong>{project.name}</strong>
+      <strong class="project-name">{project.name}</strong>
       {#if velocity}
         <span class="velocity" title={velocity.estimated
           ? 'No completed iteration yet — using the default velocity'
@@ -492,14 +527,16 @@
           Velocity <b>{velocity.velocity}</b>{velocity.estimated ? '*' : ''}
         </span>
       {/if}
-      <FilterBar
-        projectId={project.id}
-        {query}
-        saved={savedFilters}
-        onquery={(q) => (query = q)}
-        onsavedchanged={(f) => (savedFilters = f)}
-        oninput={(el) => (searchInput = el)}
-      />
+      {#if !mobile}
+        <FilterBar
+          projectId={project.id}
+          {query}
+          saved={savedFilters}
+          onquery={(q) => (query = q)}
+          onsavedchanged={(f) => (savedFilters = f)}
+          oninput={(el) => (searchInput = el)}
+        />
+      {/if}
       {#if activeEpic}
         <button class="chip" onclick={() => (activeEpic = null)} title="Clear epic filter">epic: {activeEpic} ✕</button>
       {/if}
@@ -516,20 +553,26 @@
             ? 'Connection lost — reconnecting'
             : 'Connecting…'}>●</span
       >
-      <button class:on={showEpics} onclick={toggleEpics} title="Epics (e)">Epics</button>
-      <button class:on={showDone} onclick={toggleDone}>Done</button>
-      <button class:on={showTrash} onclick={toggleTrash} title="Deleted stories">Trash</button>
-      {#if !readOnly}<button onclick={() => (creating = 'icebox')} title="New story (c)">+ Story</button>{/if}
-      <button onclick={() => (showSettings = true)}>Settings</button>
-      <button onclick={() => (showHelp = !showHelp)} title="Keyboard shortcuts (?)">?</button>
+      {#if !mobile}
+        <button class:on={showEpics} onclick={toggleEpics} title="Epics (e)">Epics</button>
+        <button class:on={showDone} onclick={toggleDone}>Done</button>
+        <button class:on={showTrash} onclick={toggleTrash} title="Deleted stories">Trash</button>
+        {#if !readOnly}<button onclick={() => (creating = creatingSection())} title="New story (c)">+ Story</button>{/if}
+        <button onclick={() => (showSettings = true)}>Settings</button>
+        <button onclick={() => (showHelp = !showHelp)} title="Keyboard shortcuts (?)">?</button>
+      {/if}
       <div class="menu">
-        <button class:on={menuOpen} onclick={() => (menuOpen = !menuOpen)} aria-haspopup="menu" aria-expanded={menuOpen}>
-          {user.display_name} ▾
+        <button class:on={menuOpen} onclick={() => (menuOpen = !menuOpen)} aria-haspopup="menu" aria-expanded={menuOpen} aria-label="Menu">
+          {mobile ? '☰' : `${user.display_name} ▾`}
         </button>
         {#if menuOpen}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <div class="menu-backdrop" onclick={() => (menuOpen = false)}></div>
           <div class="menu-items" role="menu">
+            {#if mobile}
+              <button role="menuitem" onclick={() => ((showSettings = true), (menuOpen = false))}>Project settings…</button>
+              <div class="sep"></div>
+            {/if}
             <button role="menuitem" onclick={() => ((showAccount = true), (menuOpen = false))}>Account…</button>
             {#if user.is_admin}
               <button role="menuitem" onclick={() => ((showUsers = true), (menuOpen = false))}>Users…</button>
@@ -540,20 +583,43 @@
       </div>
     </header>
 
+    {#if mobile}
+      <div class="filter-row">
+        <FilterBar
+          projectId={project.id}
+          {query}
+          saved={savedFilters}
+          onquery={(q) => (query = q)}
+          onsavedchanged={(f) => (savedFilters = f)}
+          oninput={(el) => (searchInput = el)}
+        />
+      </div>
+      <nav class="tabs" aria-label="Panels">
+        {#each [['icebox', 'Icebox', lists.icebox.length], ['backlog', 'Backlog', lists.backlog.length], ['current', 'Current', lists.current.length + accepted.length], ['epics', 'Epics', epics.length], ['done', 'Done', null], ['trash', 'Trash', null]] as const as [tab, label, count] (tab)}
+          <button class:on={mobileTab === tab} onclick={() => selectTab(tab)} role="tab" aria-selected={mobileTab === tab}>
+            {label}{#if count !== null && count > 0}<span class="count">{count}</span>{/if}
+          </button>
+        {/each}
+      </nav>
+    {/if}
+
     <main
       class="panels"
-      style:grid-template-columns={`${showEpics ? 'minmax(0, 0.7fr) ' : ''}repeat(${3 + Number(showDone) + Number(showTrash)}, minmax(0, 1fr))`}
+      class:mobile
+      style:grid-template-columns={mobile
+        ? 'minmax(0, 1fr)'
+        : `${showEpics ? 'minmax(0, 0.7fr) ' : ''}repeat(${3 + Number(showDone) + Number(showTrash)}, minmax(0, 1fr))`}
     >
-      {#if showEpics}
+      {#if mobile ? mobileTab === 'epics' : showEpics}
         <EpicsPanel projectId={project.id} {epics} active={activeEpic} canWrite={!readOnly} onchanged={loadEpics} onselect={(n) => (activeEpic = n)} />
       {/if}
-      {#if showDone}
+      {#if mobile ? mobileTab === 'done' : showDone}
         <DonePanel {iterations} stories={doneStories} {users} {selectedId} velocity={velocity?.velocity ?? null} onopen={openStoryRow} />
       {/if}
-      {#if showTrash}
+      {#if mobile ? mobileTab === 'trash' : showTrash}
         <TrashPanel stories={trashStories} onrestore={(s) => restoreStory(s.id)} onopen={openStoryRow} />
       {/if}
-      {#each SECTIONS as section (section)}
+      {#each SECTIONS.filter((s) => !mobile || s === mobileTab) as section (section)}
         <Panel
           {section}
           rows={rows[section]}
@@ -581,6 +647,10 @@
     </main>
   </div>
 
+  {#if mobile && !readOnly && !openStory && !creating}
+    <button class="fab" onclick={() => (creating = creatingSection())} aria-label="New story">+</button>
+  {/if}
+
   {#snippet currentTop()}
     {#if currentTotal > 0}
       <div class="progress" title="Accepted points in this iteration">
@@ -600,6 +670,7 @@
       me={user}
       {stories}
       {readOnly}
+      onmove={moveToSection}
       onpatch={patchStory}
       ondelete={deleteStory}
       onrestore={restoreStory}
@@ -725,16 +796,94 @@
     gap: 8px;
     padding: 8px;
   }
-  @media (max-width: 900px) {
-    .panels {
-      grid-auto-flow: column;
-      grid-template-columns: none !important;
-      grid-auto-columns: minmax(300px, 88vw);
-      overflow-x: auto;
-    }
-    .me {
-      display: none;
-    }
+  .panels.mobile {
+    padding: 6px;
+  }
+  .topbar.mobile {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+  .topbar.mobile .project-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .topbar.mobile .velocity {
+    display: none;
+  }
+  .topbar.mobile .spacer {
+    flex: 0;
+  }
+  .topbar.mobile .menu > button {
+    font-size: 16px;
+    padding: 0 10px;
+    min-height: 32px;
+  }
+  .filter-row {
+    padding: 6px 8px 0;
+    background: var(--panel-head);
+  }
+  .filter-row :global(.filter) {
+    width: 100%;
+  }
+  .filter-row :global(.search) {
+    flex: 1;
+    width: auto;
+    min-height: 34px;
+  }
+  .filter-row :global(.filter > button) {
+    color: var(--panel-head-text);
+    min-height: 34px;
+  }
+  .tabs {
+    display: flex;
+    background: var(--panel-head);
+    padding: 6px 8px 0;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs button {
+    flex: 1;
+    min-height: 34px;
+    border: 0;
+    border-radius: 6px 6px 0 0;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--panel-head-text);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    padding: 4px 8px;
+  }
+  .tabs button.on {
+    background: var(--bg);
+    color: var(--text);
+  }
+  .tabs .count {
+    margin-left: 4px;
+    font-weight: 400;
+    opacity: 0.7;
+  }
+  .fab {
+    position: fixed;
+    right: 18px;
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: 0;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-size: 28px;
+    line-height: 1;
+    box-shadow: var(--shadow);
+    z-index: 15;
+  }
+  .menu-items .sep {
+    border-top: 1px solid var(--border);
+    margin: 3px 0;
   }
   .progress {
     display: flex;

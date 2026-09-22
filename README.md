@@ -74,6 +74,12 @@ you land on the board:
 - **Members** (Settings): a project with no members is open to everyone; add
   members to make it members-only. Viewers can read but not change anything;
   administrators always have access. Projects you cannot see are not listed.
+- **On a phone** (≤ 900 px) the board shows one panel at a time with a tab
+  strip (Icebox · Backlog · Current · Epics · Done · Trash), a full-width
+  filter box, a ☰ menu for settings/account, and a floating **+** that creates
+  in the visible panel. Reordering is hold-to-drag (a quick swipe scrolls);
+  moving between panels is done from the story's **Move to** buttons. The
+  drawer fills the screen.
 - Your name and password live under *your name ▸ Account*. Administrators get
   *Users*: rename, promote/demote, deactivate/reactivate, reset a password.
   Administrators can also **Reopen** an accepted story (it drops out of
@@ -193,7 +199,9 @@ frontend tests cover the board logic (move requests, optimistic moves, backlog
 projection), the SortableJS adapter, the live-update client and the story
 row's workflow buttons. `make e2e` drives the real binary in headless
 Chromium: drag/drop (rows and empty column space), keyboard, workflow buttons,
-search, trash/undo, the account dialog, and — with two browsers — live sync.
+search, trash/undo, the account dialog, — with two browsers — live sync, and
+(with iPhone emulation and touch input) the phone layout: tabs, FAB, drawer
+"Move to", hold-to-drag reordering.
 
 CI (`.github/workflows/ci.yml`) runs all of that plus a check that
 `internal/database/dbgen` matches `db/queries`, and builds the Docker image
@@ -557,4 +565,5 @@ runtime plus the pure-Go SQLite engine; the page cache is capped at 8 MB.
   beyond that.
 - No attachments, sub-epics, or notifications. Blockers are informational.
 - PostgreSQL is designed for but not implemented.
-- The Svelte UI is desktop-first; on narrow screens the panels scroll sideways.
+- On phones there is no cross-panel drag (use the drawer's Move to) and no
+  multi-select; keyboard shortcuts need a keyboard.

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { api } from '../lib/api'
-  import { ESTIMATES, nextActions } from '../lib/board'
+  import { ESTIMATES, SECTION_TITLES, canDrop, nextActions } from '../lib/board'
   import { formatDayTime } from '../lib/format'
-  import type { Activity, Comment, Story, StoryPatch, StoryType, Task, User } from '../lib/types'
+  import type { Activity, Comment, DropSection, Story, StoryPatch, StoryType, Task, User } from '../lib/types'
 
   interface Props {
     story: Story
@@ -12,12 +12,14 @@
     stories?: Story[]
     readOnly?: boolean
     onpatch: (id: number, patch: StoryPatch) => Promise<boolean>
+    /** Append the story to a section; shown for sections it may move to. */
+    onmove?: (id: number, section: DropSection) => void
     ondelete: (id: number) => Promise<void>
     onrestore: (id: number) => Promise<void>
     oncommented: (id: number, delta: number) => void
     onclose: () => void
   }
-  let { story, users, me, stories = [], readOnly = false, onpatch, ondelete, onrestore, oncommented, onclose }: Props = $props()
+  let { story, users, me, stories = [], readOnly = false, onmove, onpatch, ondelete, onrestore, oncommented, onclose }: Props = $props()
 
   // Text fields are edited locally and saved on blur; they re-sync whenever
   // the story changes underneath (server response, background refresh).
@@ -62,6 +64,9 @@
   let trashed = $derived(story.deleted_at != null)
   let frozen = $derived(trashed || readOnly)
   let locked = $derived(story.state === 'accepted' || frozen)
+  let moveTargets = $derived(
+    (['icebox', 'backlog', 'current'] as DropSection[]).filter((s) => s !== story.section && canDrop(story, s)),
+  )
   let blockerTitle = (id: number) => stories.find((s) => s.id === id)?.title ?? `#${id}`
   let blockerCandidates = $derived(
     stories
@@ -267,6 +272,17 @@
       </label>
     </div>
 
+    {#if onmove && !frozen && moveTargets.length}
+      <div class="field">
+        <span>Move to</span>
+        <span class="move-targets">
+          {#each moveTargets as s (s)}
+            <button onclick={() => onmove(story.id, s)}>{SECTION_TITLES[s]}</button>
+          {/each}
+        </span>
+      </div>
+    {/if}
+
     <div class="field">
       <span>Estimate</span>
       <span class="estimates" role="group" aria-label="Estimate">
@@ -440,6 +456,23 @@
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 8px;
+  }
+  .move-targets {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  @media (max-width: 600px) {
+    .drawer {
+      width: 100vw;
+      border-left: 0;
+    }
+    .grid {
+      grid-template-columns: 1fr;
+    }
+    header {
+      flex-wrap: wrap;
+    }
   }
   select,
   textarea {
