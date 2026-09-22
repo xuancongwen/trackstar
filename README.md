@@ -102,7 +102,7 @@ internal/iteration/   Schedule → iteration N, iteration containing t
 internal/velocity/    velocity + iteration history from accepted stories
 db/                   migrations, queries, sqlc.yaml
 web/                  Svelte app; web/embed.go embeds web/dist
-scripts/ deploy/      installation, deploy, update, backup, restore; systemd unit, env example
+scripts/ deploy/      setup.sh (server), setup-lxc.sh (inside an LXC), deploy, update, backup, restore; systemd unit, env example
 ```
 
 Design decisions worth knowing:
@@ -303,33 +303,49 @@ machine with `TRACKER_ADDR=127.0.0.1:3000`. After creating your accounts set
 
 ## Proxmox LXC installation
 
-On the Proxmox VE host, from an extracted release archive:
+Create the container yourself in the Proxmox UI or with `pct`; Tracker does not
+need anything unusual. Recommended (floor in brackets):
+
+| | | Why |
+|---|---|---|
+| Template | Debian 13 standard (Ubuntu also works) | `setup.sh` supports Debian/Ubuntu |
+| Type | **unprivileged** | Tracker runs as the `tracker` user without capabilities |
+| Cores | 1 | idle CPU is ~0; a request is ~1 ms |
+| RAM | **512 MB** (256) | tracker uses 15–50 MB; the rest is Debian + headroom for `apt upgrade` |
+| Swap | 512 MB (256) | safety net for upgrade spikes; unused in normal operation |
+| Disk | 8 GB (4) | template ≈ 0.5 GB, the database is a few MB, backups are the size of the database |
+| Features | none | **nesting is not required** — see below |
+| Start at boot | yes | |
+
+Then, inside the container as root (after your own network setup and
+`apt update && apt upgrade`), from an extracted release archive:
 
 ```sh
-./scripts/setup-lxc.sh --vmid 120 --hostname tracker --storage local-lvm \
-  --bridge vmbr0 --memory 512 --cores 1 --disk 8 --ip dhcp
-
-# static addressing
-./scripts/setup-lxc.sh --vmid 120 --ip 192.168.1.240/24 --gateway 192.168.1.1 \
-  --public-url https://track.example.com/
+./scripts/setup-lxc.sh --public-url https://track.example.com/ --port 3000 --timezone Europe/Berlin
 ```
 
-It checks that it runs on a PVE host (`pct`, `pvesh`, `pveam`, `pvesm`),
-validates VMID/storage/bridge, downloads the newest Debian standard template if
-needed, creates an **unprivileged** container (defaults: 1 core, 512 MB RAM,
-512 MB swap, 8 GB disk, start on boot), waits for the network, pushes the
-release in, runs the normal `setup.sh` inside and prints the container id, IP,
-URL and service status. `--help` lists every option (`--vlan`, `--nameserver`,
-`--ssh-keys`, `--template`, `--release`, `--release-url`, `--timezone`, …).
+`setup-lxc.sh` is the in-container step: it checks that it really is running
+in an LXC (`--force` to override), prints what the container provides
+(privileged?, cores, RAM/swap limits from cgroups, whether mount namespaces
+work) and warns about anything that matters (under 200 MB RAM, no DNS), installs
+the few packages a bare template lacks, makes the journal persistent, and runs
+the normal `setup.sh` with every option you passed (`--binary`,
+`--release-url`, `--repo`, `--allow-registration`, … all work). It ends with the
+container's IP, URLs, service status and memory use. `--skip-upgrade` skips
+`apt-get upgrade`.
 
-No Docker and **no nesting**: systemd's mount-namespace sandboxing
-(`ProtectSystem=`, `PrivateTmp=` …) is not available in an unprivileged
-container without nesting, so `setup.sh` probes for it with `systemd-run` and,
-only if the probe fails, installs
+Alternatively, once root SSH into the container works, do it all from your
+workstation: `./scripts/deploy.sh root@<container-ip> -- --public-url https://track.example.com/`.
+
+**About nesting.** systemd's mount-namespace sandboxing (`ProtectSystem=`,
+`PrivateTmp=`, …) is unavailable in an unprivileged container without the
+*nesting* feature, so `setup.sh` probes for it with `systemd-run` and, only if
+the probe fails, installs
 `/etc/systemd/system/tracker.service.d/10-no-namespaces.conf`, which turns off
 just those directives. The service still runs as the unprivileged `tracker`
 user with no capabilities, inside an unprivileged container. If you prefer the
-full sandbox, pass `--nesting` and re-run `setup.sh` in the container.
+full sandbox, enable nesting on the container and re-run `setup.sh`; it removes
+the drop-in when the probe succeeds.
 
 ## Docker installation
 

@@ -1,254 +1,161 @@
 #!/usr/bin/env bash
-# Create a dedicated unprivileged Debian LXC for Tracker on a Proxmox VE host
-# and install Tracker inside it with the normal setup.sh.
+# Install Tracker inside an existing Debian/Ubuntu LXC (Proxmox or otherwise).
 #
-#   ./setup-lxc.sh --vmid 120 --hostname tracker --storage local-lvm --bridge vmbr0 \
-#                  --memory 512 --cores 1 --disk 8 --ip dhcp
-#   ./setup-lxc.sh --vmid 120 --ip 192.168.1.240/24 --gateway 192.168.1.1 \
-#                  --public-url https://track.example.com/
+# Run this *inside* the container, as root, after you have created it, given it
+# a network and updated it. It checks the container for what Tracker needs,
+# installs the few required packages and then runs the normal scripts/setup.sh
+# with any options you pass through:
 #
-# Run it from an extracted release archive (it ships ./tracker next to scripts/),
-# or point it at a release with --release PATH.tar.gz | --release-url URL.
-# No Docker, no nesting, no privileged container.
+#   ./setup-lxc.sh --public-url https://track.example.com/ --port 3000 --timezone Europe/Berlin
+#
+# The binary comes from the extracted release this script ships in, or from
+# --binary PATH | --release-url URL | --repo OWNER/NAME [--version TAG]
+# (all forwarded to setup.sh). Recommended container: unprivileged, Debian 13,
+# 1 core, 512 MB RAM, 512 MB swap, 8 GB disk, no nesting required.
 set -euo pipefail
 
-VMID=""
-CT_HOSTNAME=tracker
-STORAGE=local-lvm
-TEMPLATE_STORAGE=local
-TEMPLATE=""
-BRIDGE=vmbr0
-MEMORY=512
-SWAP=512
-CORES=1
-DISK=8
-IP=dhcp
-GATEWAY=""
-NAMESERVER=""
-VLAN=""
-PORT=3000
-PUBLIC_URL=""
-TIMEZONE=""
-RELEASE=""
-RELEASE_URL=""
-SSH_KEYS=""
-NESTING=0
-ONBOOT=1
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+FORCE=0
+SKIP_UPGRADE=0
+PASSTHRU=()
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; cat <<'USAGE'
+usage() {
+  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+  cat <<'USAGE'
 
-Container:
-  --vmid N               container id (default: next free id)
-  --hostname NAME        (default tracker)
-  --storage NAME         rootfs storage (default local-lvm)
-  --template-storage N   storage holding CT templates (default local)
-  --template VOLID       use this template instead of the newest Debian standard one
-  --bridge NAME          (default vmbr0)      --vlan TAG
-  --memory MB            (default 512)        --swap MB   (default 512)
-  --cores N              (default 1)          --disk GB   (default 8)
-  --ip dhcp|CIDR         (default dhcp)       --gateway IP   --nameserver IP
-  --ssh-keys FILE        authorized_keys for root inside the container
-  --no-onboot            do not start the container at host boot
-  --nesting              enable LXC nesting (not needed; setup.sh adapts the
-                         systemd sandbox instead — see README)
-Tracker:
-  --port N               (default 3000)
-  --public-url URL       (default http://<container-ip>:<port>/)
-  --timezone ZONE        IANA zone for iteration boundaries
-  --release FILE         release .tar.gz to install
-  --release-url URL      release .tar.gz to download inside the container
+Options handled here:
+  --force          continue even if this does not look like an LXC
+  --skip-upgrade   do not run apt-get upgrade (you already did)
+  -h, --help
+Every other option is passed to setup.sh (see: scripts/setup.sh --help).
 USAGE
 }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --vmid) VMID=${2:?}; shift 2 ;;
-    --hostname) CT_HOSTNAME=${2:?}; shift 2 ;;
-    --storage) STORAGE=${2:?}; shift 2 ;;
-    --template-storage) TEMPLATE_STORAGE=${2:?}; shift 2 ;;
-    --template) TEMPLATE=${2:?}; shift 2 ;;
-    --bridge) BRIDGE=${2:?}; shift 2 ;;
-    --vlan) VLAN=${2:?}; shift 2 ;;
-    --memory) MEMORY=${2:?}; shift 2 ;;
-    --swap) SWAP=${2:?}; shift 2 ;;
-    --cores) CORES=${2:?}; shift 2 ;;
-    --disk) DISK=${2:?}; shift 2 ;;
-    --ip) IP=${2:?}; shift 2 ;;
-    --gateway) GATEWAY=${2:?}; shift 2 ;;
-    --nameserver) NAMESERVER=${2:?}; shift 2 ;;
-    --ssh-keys) SSH_KEYS=${2:?}; shift 2 ;;
-    --no-onboot) ONBOOT=0; shift ;;
-    --nesting) NESTING=1; shift ;;
-    --port) PORT=${2:?}; shift 2 ;;
-    --public-url) PUBLIC_URL=${2:?}; shift 2 ;;
-    --timezone) TIMEZONE=${2:?}; shift 2 ;;
-    --release) RELEASE=${2:?}; shift 2 ;;
-    --release-url) RELEASE_URL=${2:?}; shift 2 ;;
+    --force) FORCE=1; shift ;;
+    --skip-upgrade) SKIP_UPGRADE=1; shift ;;
     -h|--help) usage; exit 0 ;;
-    *) die "unknown option: $1 (see --help)" ;;
+    *) PASSTHRU+=("$1"); shift ;;
   esac
 done
 
-# --- 1. validate the host -------------------------------------------------------
+[ "$(id -u)" -eq 0 ] || die "run as root inside the container"
+[ -x "$SCRIPT_DIR/setup.sh" ] || die "scripts/setup.sh not found next to this script; run from an extracted release"
 
-[ "$(id -u)" -eq 0 ] || die "run as root on the Proxmox host"
-for tool in pct pvesh pveam pvesm; do
-  command -v "$tool" >/dev/null || die "'$tool' not found: this must run on a Proxmox VE host"
-done
-[ -d /etc/pve ] || die "/etc/pve not found: this must run on a Proxmox VE host"
+# --- 1. are we inside an LXC? --------------------------------------------------
 
-for n in MEMORY SWAP CORES DISK PORT; do
-  case "${!n}" in ''|*[!0-9]*) die "--$(echo "$n" | tr '[:upper:]' '[:lower:]') must be a number" ;; esac
-done
-if [ "$IP" != dhcp ]; then
-  case "$IP" in */*) ;; *) die "--ip must be 'dhcp' or CIDR notation such as 192.168.1.240/24" ;; esac
-  [ -n "$GATEWAY" ] || die "--gateway is required with a static --ip"
-elif [ -n "$GATEWAY" ]; then
-  die "--gateway only makes sense with a static --ip"
-fi
-[ -z "$SSH_KEYS" ] || [ -f "$SSH_KEYS" ] || die "ssh key file not found: $SSH_KEYS"
+virt=$(systemd-detect-virt --container 2>/dev/null || true)
+case "$virt" in
+  lxc|lxc-libvirt) ;;
+  none|"")
+    [ "$FORCE" -eq 1 ] || die "this does not look like a container (systemd-detect-virt: ${virt:-unknown}); use scripts/setup.sh on a plain VM, or --force" ;;
+  *)
+    warn "container type is '$virt', not lxc; continuing" ;;
+esac
 
-if [ -z "$VMID" ]; then
-  VMID=$(pvesh get /cluster/nextid)
-  log "Using next free VMID $VMID"
-fi
-case "$VMID" in *[!0-9]*) die "--vmid must be a number" ;; esac
-if pct status "$VMID" >/dev/null 2>&1 || qm status "$VMID" >/dev/null 2>&1; then
-  die "VMID $VMID is already in use"
-fi
-pvesm status --storage "$STORAGE" >/dev/null 2>&1 || die "storage '$STORAGE' not found (see: pvesm status)"
-pvesm status --storage "$TEMPLATE_STORAGE" >/dev/null 2>&1 || die "template storage '$TEMPLATE_STORAGE' not found"
-[ -d "/sys/class/net/$BRIDGE" ] || die "bridge '$BRIDGE' does not exist on this host"
+# shellcheck disable=SC1091
+. /etc/os-release
+case " ${ID:-} ${ID_LIKE:-} " in
+  *" debian "*|*" ubuntu "*) ;;
+  *) die "unsupported distribution '${PRETTY_NAME:-unknown}'; only Debian and Ubuntu are supported" ;;
+esac
 
-# --- locate the Tracker release before creating anything -------------------------
+# --- 2. describe the container and warn about anything that matters -------------
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-ROOT_DIR=$(dirname "$SCRIPT_DIR")
-WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
+read_cgroup() { # file → value or "max"
+  local f="/sys/fs/cgroup/$1"
+  [ -r "$f" ] && cat "$f" 2>/dev/null || echo max
+}
+human() { # bytes or "max"
+  case "$1" in
+    max|"") echo "unlimited" ;;
+    *) awk -v b="$1" 'BEGIN { if (b >= 1073741824) printf "%.1f GB", b/1073741824; else printf "%d MB", b/1048576 }' ;;
+  esac
+}
 
-PAYLOAD=""
-if [ -n "$RELEASE" ]; then
-  [ -f "$RELEASE" ] || die "release not found: $RELEASE"
-  PAYLOAD=$RELEASE
-elif [ -z "$RELEASE_URL" ]; then
-  bin=""
-  [ -x "$ROOT_DIR/tracker" ] && bin=$ROOT_DIR/tracker
-  [ -z "$bin" ] && [ -x "$ROOT_DIR/bin/tracker" ] && bin=$ROOT_DIR/bin/tracker
-  [ -n "$bin" ] || die "no Tracker release found: run from an extracted release, or pass --release / --release-url"
-  mkdir -p "$WORK/tracker-release"
-  cp "$bin" "$WORK/tracker-release/tracker"
-  cp -r "$ROOT_DIR/scripts" "$ROOT_DIR/deploy" "$WORK/tracker-release/"
-  tar -C "$WORK" -czf "$WORK/tracker-release.tar.gz" tracker-release
-  PAYLOAD=$WORK/tracker-release.tar.gz
-fi
-
-# --- 2. template ------------------------------------------------------------------
-
-if [ -z "$TEMPLATE" ]; then
-  log "Looking for a Debian template"
-  pveam update >/dev/null 2>&1 || warn "pveam update failed; using the cached template index"
-  tmpl_name=$(pveam available --section system | awk '{print $2}' | grep -E '^debian-1[0-9]-standard_.*_amd64\.tar\.(zst|gz|xz)$' | sort -V | tail -n1) || true
-  [ -n "$tmpl_name" ] || die "no Debian standard template in the pveam index; pass --template"
-  TEMPLATE=$TEMPLATE_STORAGE:vztmpl/$tmpl_name
-  if ! pveam list "$TEMPLATE_STORAGE" | awk '{print $1}' | grep -qx "$TEMPLATE"; then
-    log "Downloading $tmpl_name"
-    pveam download "$TEMPLATE_STORAGE" "$tmpl_name" >/dev/null
-  fi
-fi
-log "Template: $TEMPLATE"
-
-# --- 3./4. create -----------------------------------------------------------------
-
-net0="name=eth0,bridge=$BRIDGE,ip=$IP"
-[ -z "$GATEWAY" ] || net0+=",gw=$GATEWAY"
-[ -z "$VLAN" ] || net0+=",tag=$VLAN"
-[ "$IP" != dhcp ] || net0+=",ip6=auto"
-
-create_args=(
-  "$VMID" "$TEMPLATE"
-  --hostname "$CT_HOSTNAME"
-  --ostype debian
-  --unprivileged 1
-  --cores "$CORES" --memory "$MEMORY" --swap "$SWAP"
-  --rootfs "$STORAGE:$DISK"
-  --net0 "$net0"
-  --onboot "$ONBOOT"
-  --description "Tracker project tracker - created by setup-lxc.sh"
-)
-[ -z "$NAMESERVER" ] || create_args+=(--nameserver "$NAMESERVER")
-[ -z "$SSH_KEYS" ] || create_args+=(--ssh-public-keys "$SSH_KEYS")
-[ "$NESTING" -eq 0 ] || create_args+=(--features nesting=1)
-
-log "Creating container $VMID ($CORES core, ${MEMORY} MB RAM, ${SWAP} MB swap, ${DISK} GB on $STORAGE)"
-pct create "${create_args[@]}" >/dev/null
-
-# From here on, tell the user how to clean up if something fails.
-on_error() { warn "setup failed. Inspect with 'pct enter $VMID' or remove with: pct stop $VMID; pct destroy $VMID"; }
-trap 'on_error; rm -rf "$WORK"' ERR
-
-# --- 5. start ---------------------------------------------------------------------
-
-log "Starting container"
-pct start "$VMID"
-
-log "Waiting for network"
-CT_IP=""
-for _ in $(seq 1 60); do
-  CT_IP=$(pct exec "$VMID" -- sh -c "ip -4 -o addr show dev eth0 scope global 2>/dev/null | awk '{print \$4}' | cut -d/ -f1 | head -n1") || true
-  [ -n "$CT_IP" ] && break
-  sleep 1
-done
-[ -n "$CT_IP" ] || die "container did not get an IPv4 address on eth0 (check bridge/DHCP/VLAN)"
-log "Container IP: $CT_IP"
-
-for _ in $(seq 1 30); do
-  pct exec "$VMID" -- sh -c 'getent hosts deb.debian.org >/dev/null' 2>/dev/null && break
-  sleep 1
-done
-
-# --- 6.–9. install inside the container ---------------------------------------------
-
-setup_args=(--port "$PORT" --public-url "${PUBLIC_URL:-http://$CT_IP:$PORT/}")
-[ -z "$TIMEZONE" ] || setup_args+=(--timezone "$TIMEZONE")
-
-if [ -n "$PAYLOAD" ]; then
-  log "Copying the Tracker release into the container"
-  pct push "$VMID" "$PAYLOAD" /root/tracker-release.tar.gz
-  pct exec "$VMID" -- sh -c 'rm -rf /root/tracker-release && mkdir -p /root/tracker-release && tar -xzf /root/tracker-release.tar.gz -C /root/tracker-release --strip-components=1 --no-same-owner'
+mem_max=$(read_cgroup memory.max)
+swap_max=$(read_cgroup memory.swap.max)
+cores=$(nproc)
+if grep -q '^ *0 *0 *4294967295' /proc/self/uid_map 2>/dev/null; then
+  privileged="privileged"
 else
-  # Bootstrap: setup.sh downloads the release itself, it only needs curl first.
-  log "Downloading the Tracker release inside the container"
-  pct exec "$VMID" -- sh -c 'export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl >/dev/null'
-  pct exec "$VMID" -- sh -c "rm -rf /root/tracker-release && mkdir -p /root/tracker-release && curl -fsSL --retry 3 '$RELEASE_URL' | tar -xz -C /root/tracker-release --strip-components=1 --no-same-owner"
+  privileged="unprivileged"
+fi
+if unshare --mount true 2>/dev/null; then
+  nesting="mount namespaces available (nesting on or privileged): full systemd sandbox"
+else
+  nesting="no mount namespaces (nesting off): setup.sh will install the relaxed-sandbox drop-in"
+fi
+ip_addr=$(hostname -I 2>/dev/null | awk '{print $1}') || true
+
+log "Container: ${PRETTY_NAME}, ${privileged}, ${cores} core(s), RAM $(human "$mem_max"), swap $(human "$swap_max")"
+log "Sandbox:   $nesting"
+
+if [ "$mem_max" != max ] && [ "$mem_max" -lt $((200 * 1024 * 1024)) ]; then
+  warn "less than 200 MB of RAM: Tracker itself needs ~50 MB, but apt upgrades may fail; 256–512 MB is recommended"
+fi
+if [ "$privileged" = privileged ]; then
+  warn "privileged container: Tracker does not need it; an unprivileged container is the safer default"
+fi
+[ -n "$ip_addr" ] || warn "no IPv4 address on this container yet; the printed URL will be a placeholder"
+if ! getent hosts deb.debian.org >/dev/null 2>&1 && ! getent hosts archive.ubuntu.com >/dev/null 2>&1; then
+  warn "DNS resolution failed; package installation and downloads will not work"
 fi
 
-log "Running setup.sh inside the container"
-pct exec "$VMID" -- bash /root/tracker-release/scripts/setup.sh "${setup_args[@]}"
-pct exec "$VMID" -- rm -rf /root/tracker-release /root/tracker-release.tar.gz
+# --- 3. minimal packages -----------------------------------------------------------
 
-# --- 10. report -------------------------------------------------------------------
+export DEBIAN_FRONTEND=noninteractive
+log "Updating package index"
+apt-get update -qq
+if [ "$SKIP_UPGRADE" -eq 0 ]; then
+  log "Upgrading packages (--skip-upgrade to skip)"
+  apt-get upgrade -y -qq >/dev/null
+fi
+# setup.sh installs what it needs (ca-certificates curl tar); this is only what
+# a bare template may lack for the checks above and for day-to-day operation.
+apt-get install -y -qq --no-install-recommends ca-certificates curl tar util-linux procps >/dev/null
 
-trap 'rm -rf "$WORK"' ERR
-status=$(pct exec "$VMID" -- systemctl is-active tracker 2>/dev/null || true)
+# A persistent journal so `journalctl -u tracker` survives a container restart.
+if [ ! -d /var/log/journal ]; then
+  mkdir -p /var/log/journal
+  systemd-tmpfiles --create --prefix /var/log/journal >/dev/null 2>&1 || true
+  systemctl restart systemd-journald 2>/dev/null || true
+fi
+
+# --- 4. the normal installation ------------------------------------------------------
+
+log "Running setup.sh ${PASSTHRU[*]+"${PASSTHRU[*]}"}"
+bash "$SCRIPT_DIR/setup.sh" "${PASSTHRU[@]+"${PASSTHRU[@]}"}"
+
+# --- 5. container-specific status ----------------------------------------------------
+
+env_file=/etc/tracker/tracker.env
+get_env() { sed -n "s/^$1=//p" "$env_file" 2>/dev/null | tail -n1; }
+addr=$(get_env TRACKER_ADDR); port=${addr##*:}
+status=$(systemctl is-active tracker 2>/dev/null || true)
+dropin=/etc/systemd/system/tracker.service.d/10-no-namespaces.conf
+
 cat <<DONE
 
-Tracker LXC is ready.
+Tracker is installed in this container.
 
-  Container ID:   $VMID ($CT_HOSTNAME)
-  IP address:     $CT_IP
-  Local URL:      http://$CT_IP:$PORT/
-  Public URL:     ${PUBLIC_URL:-http://$CT_IP:$PORT/}
-  Service:        ${status:-unknown}
+  Hostname:     $(hostname)
+  IP address:   ${ip_addr:-<none yet>}
+  Local URL:    http://${ip_addr:-<container-ip>}:${port:-3000}/
+  Public URL:   $(get_env TRACKER_PUBLIC_URL)
+  Service:      ${status:-unknown}$([ -f "$dropin" ] && echo "  (relaxed systemd sandbox: $dropin)")
+  Memory now:   $(awk '/MemTotal/ {t=$2} /MemAvailable/ {a=$2} END {printf "%d MB used of %d MB", (t-a)/1024, t/1024}' /proc/meminfo)
 
-  Shell:          pct enter $VMID
-  Logs:           pct exec $VMID -- journalctl -u tracker -f
-  Backup:         pct exec $VMID -- /opt/tracker/scripts/backup.sh
-  Update:         pct exec $VMID -- /opt/tracker/scripts/update.sh --file <release.tar.gz>
+Next steps:
+  * point your reverse proxy / Cloudflare Tunnel at http://${ip_addr:-<container-ip>}:${port:-3000}
+    (see /opt/tracker/deploy/cloudflared-example.md)
+  * open the public URL and register; the first account becomes the administrator
+  * then set TRACKER_ALLOW_REGISTRATION=false in $env_file and: systemctl restart tracker
+  * later: /opt/tracker/scripts/update.sh, backup.sh, restore.sh
 DONE
-[ "$IP" = dhcp ] && echo "  Note: the address comes from DHCP; add a reservation or re-create with --ip <cidr> --gateway <ip>."
-[ "$status" = active ] || die "the tracker service is not active; see the logs above"
+[ "$status" = active ] || die "the tracker service is not active; see: journalctl -u tracker -n 50"
