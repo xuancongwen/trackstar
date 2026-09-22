@@ -102,7 +102,7 @@ internal/iteration/   Schedule → iteration N, iteration containing t
 internal/velocity/    velocity + iteration history from accepted stories
 db/                   migrations, queries, sqlc.yaml
 web/                  Svelte app; web/embed.go embeds web/dist
-scripts/ deploy/      setup.sh (server), setup-lxc.sh (inside an LXC), deploy, update, backup, restore; systemd unit, env example
+scripts/ deploy/      setup-lxc.sh (prepare an LXC, system level), setup.sh (install the app), deploy, update, backup, restore; unit, env example
 ```
 
 Design decisions worth knowing:
@@ -317,25 +317,37 @@ need anything unusual. Recommended (floor in brackets):
 | Features | none | **nesting is not required** — see below |
 | Start at boot | yes | |
 
-Then, inside the container as root (after your own network setup and
-`apt update && apt upgrade`), from an extracted release archive:
+Then two steps, kept deliberately separate:
+
+**1. Prepare the container (system level).** Inside the container as root,
+after your own network setup — copy just this one file in, it is standalone:
 
 ```sh
-./scripts/setup-lxc.sh --public-url https://track.example.com/ --port 3000 --timezone Europe/Berlin
+./setup-lxc.sh --timezone Europe/Berlin --authorized-key ~/.ssh/id_ed25519.pub
 ```
 
-`setup-lxc.sh` is the in-container step: it checks that it really is running
-in an LXC (`--force` to override), prints what the container provides
-(privileged?, cores, RAM/swap limits from cgroups, whether mount namespaces
-work) and warns about anything that matters (under 200 MB RAM, no DNS), installs
-the few packages a bare template lacks, makes the journal persistent, and runs
-the normal `setup.sh` with every option you passed (`--binary`,
-`--release-url`, `--repo`, `--allow-registration`, … all work). It ends with the
-container's IP, URLs, service status and memory use. `--skip-upgrade` skips
-`apt-get upgrade`.
+`setup-lxc.sh` checks that it really is an LXC on Debian/Ubuntu (`--force` to
+override), prints what the container provides (privileged?, cores, RAM/swap
+limits from cgroups, free disk, whether mount namespaces work) and warns about
+anything that would bite later (under 200 MB RAM, no IP, broken DNS), runs
+`apt update`/`upgrade` (`--skip-upgrade` if you already did), installs the
+base packages a slim template lacks (`ca-certificates curl tar
+openssh-server …`), enables SSH, makes the journal persistent and, optionally,
+sets the system time zone and authorizes an SSH key for root. It installs
+**nothing application-specific** — no user, directories, config or service.
 
-Alternatively, once root SSH into the container works, do it all from your
-workstation: `./scripts/deploy.sh root@<container-ip> -- --public-url https://track.example.com/`.
+**2. Deploy the application.** From your workstation:
+
+```sh
+./scripts/deploy.sh root@<container-ip> -- --public-url https://track.example.com/ --timezone Europe/Berlin
+```
+
+On the first contact this runs `setup.sh` inside the container (binary,
+`trackstar` user, `/etc/trackstar`, `/var/lib/trackstar`, systemd unit, session
+secret); afterwards it only swaps the binary with snapshot and rollback. Everything
+the application needs is the deploy's job, so a container prepared once never
+needs revisiting when the application changes. (Without SSH you can also copy a
+release archive in and run `sudo ./scripts/setup.sh …` yourself.)
 
 **About nesting.** systemd's mount-namespace sandboxing (`ProtectSystem=`,
 `PrivateTmp=`, …) is unavailable in an unprivileged container without the
