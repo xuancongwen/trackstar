@@ -6,7 +6,8 @@ PLATFORMS ?= linux/amd64 linux/arm64
 
 .PHONY: dev backend frontend build test e2e lint migrate release sqlc docker clean
 
-DEV_DATA_DIR ?= ./data
+# Not ./data: docker compose bind-mounts that one and its container writes as root.
+DEV_DATA_DIR ?= ./data-dev
 DEV_PORT     ?= 5173
 DEV_API_PORT ?= 3000
 
@@ -16,8 +17,7 @@ DEV_API_PORT ?= 3000
 dev: web/node_modules
 	@if [ -e "$(DEV_DATA_DIR)" ] && [ ! -w "$(DEV_DATA_DIR)" ]; then \
 		echo "error: $(DEV_DATA_DIR) is not writable by $$(id -un) (owned by $$(stat -c %U "$(DEV_DATA_DIR)" 2>/dev/null || stat -f %Su "$(DEV_DATA_DIR)"))."; \
-		echo "       docker compose uses the same ./data and its container runs as root. Fix with:"; \
-		echo "         sudo chown -R $$(id -un): $(DEV_DATA_DIR)      # or: make dev DEV_DATA_DIR=./data-dev"; \
+		echo "       Fix with: sudo chown -R $$(id -un): $(DEV_DATA_DIR)   # or: make dev DEV_DATA_DIR=<other dir>"; \
 		exit 1; \
 	fi
 	@trap 'kill 0 2>/dev/null' INT TERM EXIT; \
@@ -59,7 +59,7 @@ lint: web/node_modules
 
 ## migrate: apply migrations to the local development database
 migrate:
-	TRACKER_DATA_DIR=./data go run ./cmd/tracker migrate
+	TRACKER_DATA_DIR=$(DEV_DATA_DIR) go run ./cmd/tracker migrate
 
 ## sqlc: regenerate internal/database/dbgen from db/queries
 sqlc:
@@ -83,5 +83,5 @@ docker:
 	docker build --build-arg VERSION=$(VERSION) -t tracker:latest .
 
 clean:
-	rm -rf bin dist data
+	rm -rf bin dist data-dev
 	find web/dist -mindepth 1 ! -name .gitkeep -delete
