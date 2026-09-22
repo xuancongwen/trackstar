@@ -72,6 +72,22 @@ If cloudflared runs on another host and you forget to list it, nothing breaks:
 logs simply show cloudflared's address for every request, and the login rate
 limit is shared by everyone coming through the tunnel.
 
+## Live updates through the tunnel
+
+The board keeps one Server-Sent Events stream open per tab
+(`/api/projects/:id/events`). Cloudflare passes streaming responses through
+and closes streams that are idle for 100 s; Tracker sends a heartbeat every
+30 s, so no tunnel configuration is needed. If you put nginx between
+cloudflared and Tracker, disable buffering for that path:
+
+```nginx
+location ~ ^/api/projects/[^/]+/events$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_buffering off;
+    proxy_read_timeout 1h;
+}
+```
+
 ## Hardening tips
 
 * When the tunnel is the only entrance, bind to loopback or firewall port 3000

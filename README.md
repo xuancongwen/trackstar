@@ -9,7 +9,7 @@ board. One Go binary, one SQLite file, no other services.
 | Runtime dependencies | none (a binary and a writable directory) |
 | Idle memory (measured) | **15–27 MB RSS** (45 MB after a request burst) — see [Resource usage](#resource-usage) |
 | Startup | a few milliseconds |
-| Stack | Go · SQLite (WAL) · sqlc · goose · Svelte 5 · TypeScript · Vite · SortableJS |
+| Stack | Go · SQLite (WAL) · sqlc · goose · Svelte 5 · TypeScript · Vite · SortableJS · Server-Sent Events |
 
 ## Contents
 
@@ -48,6 +48,8 @@ you land on the board:
   (N = 3 by default; 10 is assumed until one iteration has completed).
 - Iterations are automatic: length (1–4 weeks) and start weekday are project
   settings; nothing needs to be "closed".
+- Changes by teammates appear live (typically within ~200 ms). The dot in the
+  top bar is green while the live stream is connected.
 
 | Key | Action |
 |---|---|
@@ -63,7 +65,7 @@ you land on the board:
 
 ```
 browser ── Svelte SPA (embedded in the binary via //go:embed)
-   │  JSON over /api/*
+   │  JSON over /api/*   ◀── Server-Sent Events: /api/projects/:id/events
    ▼
 internal/api        HTTP only: routing (net/http ServeMux), middleware, JSON, status codes
    ▼
@@ -79,7 +81,8 @@ SQLite (WAL)                                              ◀── db/migration
 
 ```
 cmd/tracker/          main: serve | migrate | backup | check | reset-password | healthcheck | version
-internal/api/         handlers, middleware (request id, logging, origin check, trusted proxies)
+internal/api/         handlers, middleware (request id, logging, origin check, trusted proxies), SSE stream
+internal/events/      in-process change hub: Publish(project) → every open stream of that project
 internal/auth/        bcrypt passwords, server-side sessions (HMAC-hashed tokens), login rate limit
 internal/config/      TRACKER_* environment → validated Config
 internal/database/    Open/Migrate/InTx/Backup; sqlite.go is the only driver-specific file
@@ -109,8 +112,16 @@ Design decisions worth knowing:
 - **Sessions** are random tokens in an HttpOnly, SameSite=Lax cookie; only an
   HMAC (keyed with the session secret) is stored. State-changing requests with
   a foreign `Origin` are rejected.
-- **No websockets, no workers.** The board refreshes on tab focus and every
-  60 s while visible; expired sessions are purged on login.
+- **Live updates without websockets or workers.** Every successful write
+  publishes a tiny "project N changed" event to an in-process hub; each open
+  board holds one Server-Sent Events stream (`GET /api/projects/:id/events`)
+  and refetches the story list on receipt (debounced, echoes of its own
+  changes ignored, deferred while the user is mid-drag). `EventSource`
+  reconnects on its own and every reconnect refetches, so nothing is missed.
+  A 30 s heartbeat keeps proxies (Cloudflare: 100 s idle limit) from closing
+  the stream. Focus-refresh and a 5-minute poll remain as a safety net.
+  The hub is single-process by design; a multi-instance PostgreSQL deployment
+  would put `LISTEN/NOTIFY` behind the same two methods.
 - **Single team.** Every signed-in user sees every project (no organisations,
   roles or per-project permissions). Only deleting a project and
   `/api/system/info` are admin-only.
@@ -380,6 +391,7 @@ GET    /api/projects/:id  PATCH … DELETE …       (:id may be the numeric id 
 GET    /api/projects/:id/stories[?q=text | ?section=done]
 POST   /api/projects/:id/stories     {title, type?, estimate?, section?, description?, owner_id?, labels?}
 GET    /api/projects/:id/labels | /iterations | /velocity
+GET    /api/projects/:id/events      text/event-stream; events "stories" and "project", data {project_id, story_id, client}
 GET    /api/stories/:id              (with comments)
 PATCH  /api/stories/:id              {title, description, type, state, estimate|null, owner_id|null, requester_id, labels}
 DELETE /api/stories/:id
@@ -405,6 +417,18 @@ Measured on the first working build (linux/amd64, Go 1.27, 13 MB binary),
 | Startup to listening (existing database) | ~3 ms |
 | Idle CPU | 0 s of CPU accumulated while idle: no timers or background goroutines, only the HTTP listener |
 
+Live streams (same build, measured with 50 idle `EventSource` connections):
+
+| | |
+|---|---|
+| 50 idle streams | +4.6 MB RSS over baseline (≈ **90 KB per stream**: goroutine, HTTP buffers, subscriber channel) |
+| 60 s idle with 50 streams (two heartbeats each) | 20 ms of CPU in total |
+| 100 story moves broadcast to 50 streams | 0.36 s CPU (that is the moves themselves; a broadcast is microseconds), RSS peaked at 41 MB |
+| all streams closed | 0 streams, 7 goroutines; RSS back to 34 MB within 20 s |
+
+A board tab costs about as much as one extra HTTP keep-alive connection. Since
+the stream replaces the old 60 s poll, idle load is lower than before.
+
 Targets were < 64 MB idle, < 128 MB typical. Most of the footprint is the Go
 runtime plus the pure-Go SQLite engine; the page cache is capped at 8 MB.
 
@@ -422,6 +446,7 @@ runtime plus the pure-Go SQLite engine; the page cache is capped at 8 MB.
 | "registration is disabled" | `TRACKER_ALLOW_REGISTRATION=false` and an account exists. Enable it briefly to add a teammate. |
 | `database is locked` | Another process holds a long write lock (an open `sqlite3` shell?). Tracker waits 5 s. |
 | `attempt to write a readonly database` after running tools as root | Root created `-wal`/`-shm` files: `chown -R tracker:tracker /var/lib/tracker`. The scripts avoid this by running as `tracker`. |
+| Top-bar dot stays red / changes don't appear live | The stream is being cut: a proxy buffering or timing out `text/event-stream` (nginx: `proxy_buffering off; proxy_read_timeout 1h;` for `/api/*/events`). The board still refreshes on focus and every 5 min. |
 | Blank page: "built without the frontend" | The binary was built before `make frontend`; use `make build`. |
 | Iteration boundaries feel off by hours | Set `TRACKER_TIMEZONE` (e.g. `America/Los_Angeles`) and restart. |
 
@@ -431,7 +456,8 @@ runtime plus the pure-Go SQLite engine; the page cache is capped at 8 MB.
   so password resets are done on the server (see Troubleshooting).
 - Changing a project's iteration length or start weekday renumbers past
   iterations (they are derived, not stored).
-- No real-time push; other people's changes appear on focus or within 60 s.
+- Live updates are per process: running two instances behind one load
+  balancer would need a shared bus (PostgreSQL `LISTEN/NOTIFY`).
 - Search is a substring match (`%` and `_` act as wildcards); no ranking.
 - Deleting a story is permanent (no archive/undo); accepted stories cannot be
   reopened.

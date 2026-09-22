@@ -40,6 +40,7 @@ func (s *Server) handleCreateStory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, st)
+	s.publish(r, "stories", st.ProjectID, st.ID)
 }
 
 func (s *Server) handleListLabels(w http.ResponseWriter, r *http.Request) {
@@ -87,10 +88,17 @@ func (s *Server) handleUpdateStory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
+	s.publish(r, "stories", st.ProjectID, st.ID)
 }
 
 func (s *Server) handleDeleteStory(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r, "id")
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	// Look the project up first: the row is gone after the delete.
+	d, err := s.Stories.Get(r.Context(), id)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -100,6 +108,7 @@ func (s *Server) handleDeleteStory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+	s.publish(r, "stories", d.ProjectID, id)
 }
 
 func (s *Server) handleMoveStory(w http.ResponseWriter, r *http.Request) {
@@ -119,6 +128,7 @@ func (s *Server) handleMoveStory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+	s.publish(r, "stories", res.Story.ProjectID, res.Story.ID)
 }
 
 func (s *Server) handleCreateComment(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +150,9 @@ func (s *Server) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, c)
+	if d, err := s.Stories.Get(r.Context(), id); err == nil {
+		s.publish(r, "stories", d.ProjectID, id)
+	}
 }
 
 func (s *Server) handleDeleteComment(w http.ResponseWriter, r *http.Request) {
@@ -148,9 +161,13 @@ func (s *Server) handleDeleteComment(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	if err := s.Stories.DeleteComment(r.Context(), id, currentUser(r.Context()).ID); err != nil {
+	storyID, err := s.Stories.DeleteComment(r.Context(), id, currentUser(r.Context()).ID)
+	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+	if d, err := s.Stories.Get(r.Context(), storyID); err == nil {
+		s.publish(r, "stories", d.ProjectID, storyID)
+	}
 }

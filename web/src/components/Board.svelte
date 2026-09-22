@@ -12,6 +12,7 @@
     type BacklogRow,
   } from '../lib/board'
   import type { DropEvent } from '../lib/dragdrop'
+  import { connectLive, type LiveStatus } from '../lib/live'
   import { formatRange } from '../lib/format'
   import type { DropSection, Iteration, NewStory, Project, Story, StoryPatch, StoryState, User, Velocity } from '../lib/types'
   import DonePanel from './DonePanel.svelte'
@@ -30,7 +31,8 @@
   let { slug, user, onlogout, onunauthorized }: Props = $props()
 
   const SECTIONS: DropSection[] = ['icebox', 'backlog', 'current']
-  const REFRESH_MS = 60_000
+  // Live events do the real work; this poll is only a safety net.
+  const REFRESH_MS = 5 * 60_000
 
   let project = $state<Project | null>(null)
   let stories = $state<Story[]>([])
@@ -49,6 +51,9 @@
   let matches = $state<Set<number> | null>(null)
   let busyIds = $state(new Set<number>())
   let dragging = $state(false)
+  let liveStatus = $state<LiveStatus>('connecting')
+  // A live update arrived while the user was mid-drag or a request was in flight.
+  let refreshPending = $state(false)
   let toast = $state('')
   let loadError = $state('')
   let searchInput = $state<HTMLInputElement>()
@@ -111,26 +116,43 @@
     }
   }
 
+  // Refresh now, or as soon as the board is idle: replacing the list under a
+  // drag or before an optimistic move has been confirmed would fight the user.
+  function refreshWhenIdle() {
+    if (dragging || busyIds.size > 0) {
+      refreshPending = true
+      return
+    }
+    refreshPending = false
+    refresh()
+  }
+  $effect(() => {
+    if (refreshPending && !dragging && busyIds.size === 0) refreshWhenIdle()
+  })
+
   onMount(() => {
+    let live: ReturnType<typeof connectLive> | undefined
     ;(async () => {
       try {
         project = await api.project(slug)
         document.title = `${project.name} · Tracker`
         userList = await api.users()
         await refresh()
+        live = connectLive({ projectId: project.id, onChange: refreshWhenIdle, onStatus: (st) => (liveStatus = st) })
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) onunauthorized()
         else loadError = (err as Error).message
       }
     })()
 
-    // No websockets: refresh when the tab regains focus, plus a slow poll.
+    // Refresh when the tab regains focus (its stream may have been throttled), plus a slow poll.
     const tick = () => {
-      if (document.visibilityState === 'visible' && !dragging && busyIds.size === 0) refresh()
+      if (document.visibilityState === 'visible') refreshWhenIdle()
     }
     const timer = setInterval(tick, REFRESH_MS)
     document.addEventListener('visibilitychange', tick)
     return () => {
+      live?.close()
       clearInterval(timer)
       document.removeEventListener('visibilitychange', tick)
       document.title = 'Tracker'
@@ -359,6 +381,14 @@
         oninput={onSearchInput}
       />
       <span class="spacer"></span>
+      <span
+        class="live {liveStatus}"
+        title={liveStatus === 'live'
+          ? 'Live: changes by others appear as they happen'
+          : liveStatus === 'offline'
+            ? 'Connection lost — reconnecting'
+            : 'Connecting…'}>●</span
+      >
       <button class:on={showDone} onclick={toggleDone}>Done</button>
       <button onclick={() => (creating = 'icebox')} title="New story (c)">+ Story</button>
       <button onclick={() => (showSettings = true)}>Settings</button>
@@ -471,6 +501,19 @@
     color: inherit;
     opacity: 0.7;
     text-decoration: none;
+  }
+  .live {
+    font-size: 10px;
+    opacity: 0.85;
+  }
+  .live.live {
+    color: var(--accept);
+  }
+  .live.offline {
+    color: var(--danger);
+  }
+  .live.connecting {
+    color: var(--muted);
   }
   .velocity {
     padding: 1px 8px;

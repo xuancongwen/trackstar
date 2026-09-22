@@ -393,16 +393,17 @@ func (s *Service) AddComment(ctx context.Context, storyID, actorID int64, body s
 	return commentFromRow(row), nil
 }
 
-// DeleteComment removes a comment; only its author may do so.
-func (s *Service) DeleteComment(ctx context.Context, commentID, actorID int64) error {
+// DeleteComment removes a comment; only its author may do so. It returns the
+// id of the story the comment belonged to.
+func (s *Service) DeleteComment(ctx context.Context, commentID, actorID int64) (int64, error) {
 	c, err := s.store.GetComment(ctx, commentID)
 	if err != nil {
-		return notFound(err, "comment")
+		return 0, notFound(err, "comment")
 	}
 	if c.UserID != actorID {
-		return apperr.Forbidden("only the author can delete a comment")
+		return 0, apperr.Forbidden("only the author can delete a comment")
 	}
-	return s.store.DeleteComment(ctx, commentID)
+	return c.StoryID, s.store.DeleteComment(ctx, commentID)
 }
 
 func (s *Service) Labels(ctx context.Context, projectID int64) ([]string, error) {

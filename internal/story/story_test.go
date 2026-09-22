@@ -445,7 +445,7 @@ func TestCommentsAndDelete(t *testing.T) {
 	if _, err := f.svc.AddComment(f.ctx, s.ID, f.user, "   "); apperr.KindOf(err) != apperr.KindInvalid {
 		t.Errorf("empty comment: err = %v", err)
 	}
-	if err := f.svc.DeleteComment(f.ctx, c.ID, other); apperr.KindOf(err) != apperr.KindForbidden {
+	if _, err := f.svc.DeleteComment(f.ctx, c.ID, other); apperr.KindOf(err) != apperr.KindForbidden {
 		t.Errorf("deleting someone else's comment: err = %v", err)
 	}
 

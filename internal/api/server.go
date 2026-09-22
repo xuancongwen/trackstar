@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"tracker/internal/auth"
+	"tracker/internal/events"
 	"tracker/internal/project"
 	"tracker/internal/story"
 	"tracker/internal/user"
@@ -32,6 +33,7 @@ type Server struct {
 	Stories  *story.Service
 	Velocity *velocity.Service
 	DB       SystemDB
+	Events   *events.Hub
 	Logger   *slog.Logger
 
 	PublicURL      *url.URL
@@ -49,6 +51,9 @@ type Server struct {
 func (s *Server) Handler() http.Handler {
 	s.started = time.Now()
 	s.loginLimiter = auth.NewLimiter(20, 5*time.Minute)
+	if s.Events == nil {
+		s.Events = events.NewHub()
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
@@ -75,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 	authed("GET /api/projects/{project}/labels", s.handleListLabels)
 	authed("GET /api/projects/{project}/iterations", s.handleListIterations)
 	authed("GET /api/projects/{project}/velocity", s.handleVelocity)
+	authed("GET /api/projects/{project}/events", s.handleEvents)
 
 	authed("GET /api/stories/{id}", s.handleGetStory)
 	authed("PATCH /api/stories/{id}", s.handleUpdateStory)

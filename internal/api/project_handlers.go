@@ -61,6 +61,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
+	s.publish(r, "project", p.ID, 0)
 }
 
 func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {

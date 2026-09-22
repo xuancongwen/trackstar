@@ -31,13 +31,15 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":             s.Version,
-		"go_version":          runtime.Version(),
-		"database_driver":     s.DB.Driver(),
-		"database_size_bytes": s.DB.SizeBytes(),
-		"uptime_seconds":      int64(time.Since(s.started).Seconds()),
-		"memory_sys_bytes":    mem.Sys,
-		"goroutines":          runtime.NumGoroutine(),
+		"version":               s.Version,
+		"go_version":            runtime.Version(),
+		"database_driver":       s.DB.Driver(),
+		"database_size_bytes":   s.DB.SizeBytes(),
+		"uptime_seconds":        int64(time.Since(s.started).Seconds()),
+		"memory_sys_bytes":      mem.Sys,
+		"goroutines":            runtime.NumGoroutine(),
+		"event_streams":         s.Events.Subscribers(0),
+		"event_streams_dropped": s.Events.Dropped.Load(),
 	})
 }
 

@@ -21,11 +21,19 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Random id for this tab. Sent on every write and echoed in the change
+ * events, so the tab can ignore the echo of its own changes.
+ */
+export const CLIENT_ID = Math.random().toString(36).slice(2, 12)
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { 'X-Tracker-Client': CLIENT_ID }
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
   const res = await fetch(path, {
     method,
     credentials: 'same-origin',
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (res.status === 204) return undefined as T
