@@ -39,7 +39,7 @@ type Server struct {
 	Version        string
 	// Timezone is the IANA name iterations are cut in; the UI formats dates with it.
 	Timezone string
-	Frontend       fs.FS
+	Frontend fs.FS
 
 	started      time.Time
 	loginLimiter *auth.Limiter

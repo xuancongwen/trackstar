@@ -31,3 +31,9 @@ DELETE FROM sessions WHERE token_hash = sqlc.arg(token_hash);
 
 -- name: DeleteExpiredSessions :exec
 DELETE FROM sessions WHERE expires_at <= sqlc.arg(now);
+
+-- name: UpdateUserPassword :exec
+UPDATE users SET password_hash = sqlc.arg(password_hash), updated_at = sqlc.arg(now) WHERE id = sqlc.arg(id);
+
+-- name: DeleteUserSessions :exec
+DELETE FROM sessions WHERE user_id = sqlc.arg(user_id);

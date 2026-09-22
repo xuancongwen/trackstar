@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 	_ "time/tzdata" // TRACKER_TIMEZONE must work on hosts without zoneinfo
@@ -35,6 +37,8 @@ Commands:
   serve               run the server (default)
   migrate             apply database migrations and exit
   backup <file>       write a consistent database snapshot (safe while running)
+  check <file>        verify a database snapshot before restoring it
+  reset-password <email>   set a new password read from stdin; signs the user out everywhere
   healthcheck         query /health of the local server; exit status reflects health
   version             print the version
 
@@ -65,6 +69,33 @@ func main() {
 		}
 		err = withDB(func(ctx context.Context, _ *config.Config, db *database.DB) error {
 			return db.Backup(ctx, os.Args[2])
+		})
+	case "check":
+		if len(os.Args) != 3 {
+			err = errors.New("usage: tracker check <database-file>")
+			break
+		}
+		var v int64
+		if v, err = database.VerifySQLiteFile(context.Background(), os.Args[2]); err == nil {
+			fmt.Printf("ok: schema version %d\n", v)
+		}
+	case "reset-password":
+		if len(os.Args) != 3 {
+			err = errors.New("usage: tracker reset-password <email>   (new password on stdin)")
+			break
+		}
+		err = withDB(func(ctx context.Context, cfg *config.Config, db *database.DB) error {
+			fmt.Fprint(os.Stderr, "New password: ")
+			line, rerr := bufio.NewReader(os.Stdin).ReadString('\n')
+			if rerr != nil && line == "" {
+				return rerr
+			}
+			svc := auth.NewService(db, auth.Options{Secret: cfg.SessionSecret})
+			if err := svc.SetPassword(ctx, os.Args[2], strings.TrimRight(line, "\r\n")); err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stderr, "password updated; existing sessions were revoked")
+			return nil
 		})
 	case "healthcheck":
 		err = healthcheck()

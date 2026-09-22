@@ -1,0 +1,22 @@
+services:
+  tracker:
+    image: tracker:latest
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/var/lib/tracker
+    environment:
+      TRACKER_DATABASE_DRIVER: sqlite
+      TRACKER_DATABASE_URL: /var/lib/tracker/tracker.db
+      TRACKER_PUBLIC_URL: http://localhost:3000/
+      # TRACKER_ALLOW_REGISTRATION: "false"   # after creating your accounts
+      # TRACKER_TIMEZONE: Europe/Berlin
+    # The image runs as root so the ./data bind mount works whoever owns it.
+    # To drop root: `mkdir -p data && sudo chown 65532:65532 data`, then enable:
+    # user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m

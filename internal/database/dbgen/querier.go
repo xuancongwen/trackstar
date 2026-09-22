@@ -25,6 +25,7 @@ type Querier interface {
 	DeleteSession(ctx context.Context, tokenHash string) error
 	DeleteStory(ctx context.Context, id int64) error
 	DeleteUnusedLabels(ctx context.Context, projectID int64) error
+	DeleteUserSessions(ctx context.Context, userID int64) error
 	GetComment(ctx context.Context, id int64) (Comment, error)
 	GetLabelByName(ctx context.Context, arg GetLabelByNameParams) (Label, error)
 	GetProject(ctx context.Context, id int64) (Project, error)
@@ -53,6 +54,7 @@ type Querier interface {
 	SetStoryPosition(ctx context.Context, arg SetStoryPositionParams) error
 	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)
 	UpdateStory(ctx context.Context, arg UpdateStoryParams) (Story, error)
+	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 }
 
 var _ Querier = (*Queries)(nil)

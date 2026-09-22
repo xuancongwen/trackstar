@@ -134,6 +134,31 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (user.User, er
 	return user.FromRow(created), nil
 }
 
+// SetPassword replaces a user's password and signs them out everywhere. It
+// backs the `tracker reset-password` command; there is no e-mail flow.
+func (s *Service) SetPassword(ctx context.Context, email, password string) error {
+	if len(password) < minPasswordLength || len(password) > maxPasswordLength {
+		return apperr.Invalid("password must be %d to %d characters", minPasswordLength, maxPasswordLength)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), s.bcryptCost)
+	if err != nil {
+		return err
+	}
+	return s.store.InTx(ctx, func(q dbgen.Querier) error {
+		row, err := q.GetUserByEmail(ctx, normalizeEmail(email))
+		if database.IsNotFound(err) {
+			return apperr.NotFound("user")
+		}
+		if err != nil {
+			return err
+		}
+		if err := q.UpdateUserPassword(ctx, dbgen.UpdateUserPasswordParams{ID: row.ID, PasswordHash: string(hash), Now: s.now().Unix()}); err != nil {
+			return err
+		}
+		return q.DeleteUserSessions(ctx, row.ID)
+	})
+}
+
 // Login verifies credentials and returns a new session token.
 func (s *Service) Login(ctx context.Context, email, password string) (string, user.User, error) {
 	row, err := s.store.GetUserByEmail(ctx, normalizeEmail(email))

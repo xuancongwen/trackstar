@@ -1,0 +1,44 @@
+[Unit]
+Description=Tracker - lightweight project tracker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tracker
+Group=tracker
+EnvironmentFile=/etc/tracker/tracker.env
+ExecStart=/usr/local/bin/tracker
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+# The only writable location. SQLite keeps tracker.db, its -wal/-shm files and
+# the generated session_secret here.
+ReadWritePaths=/var/lib/tracker
+UMask=0027
+
+# Sandboxing. All of this is compatible with a static Go binary + SQLite.
+# Inside an unprivileged LXC without nesting, mount namespaces are not
+# available; setup.sh detects that and installs a drop-in that relaxes the
+# namespace-based directives (see README, "Proxmox LXC installation").
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

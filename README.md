@@ -1,0 +1,441 @@
+# Tracker
+
+A lightweight, self-hosted project tracker in the spirit of Pivotal Tracker:
+Icebox → Backlog → Current iteration, points, velocity, and a keyboard-friendly
+board. One Go binary, one SQLite file, no other services.
+
+| | |
+|---|---|
+| Runtime dependencies | none (a binary and a writable directory) |
+| Idle memory (measured) | **15–27 MB RSS** (45 MB after a request burst) — see [Resource usage](#resource-usage) |
+| Startup | a few milliseconds |
+| Stack | Go · SQLite (WAL) · sqlc · goose · Svelte 5 · TypeScript · Vite · SortableJS |
+
+## Contents
+
+- [Using it](#using-it)
+- [Architecture](#architecture)
+- [Development setup](#development-setup)
+- [Production build](#production-build)
+- [Configuration](#configuration)
+- [SQLite design](#sqlite-design)
+- [Future PostgreSQL migration](#future-postgresql-migration)
+- [DigitalOcean / any Debian-Ubuntu server](#digitalocean--any-debianubuntu-server)
+- [Proxmox LXC installation](#proxmox-lxc-installation)
+- [Docker installation](#docker-installation)
+- [Cloudflare Tunnel](#cloudflare-tunnel)
+- [Backups and restore](#backups-and-restore)
+- [Updates and deploys](#updates-and-deploys)
+- [API](#api)
+- [Resource usage](#resource-usage)
+- [Troubleshooting](#troubleshooting)
+- [Known limitations](#known-limitations)
+
+## Using it
+
+The first account you register becomes the administrator. Create a project and
+you land on the board:
+
+- **Icebox** – ideas. **Backlog** – prioritised work. **Current iteration** –
+  what is being worked on now. **Done** (toggle) – accepted work by iteration.
+- Drag rows to prioritise, or drag them between panels. Work that is in
+  progress (started/finished/delivered/rejected) stays in the current iteration.
+- Each row has the one button that matters next: Start → Finish → Deliver →
+  Accept/Reject → Restart. Unestimated features show the point scale
+  (0 1 2 3 5 8) instead of *Start*; bugs and chores may stay unestimated.
+- The backlog is cut into projected iterations using the velocity: the average
+  of accepted **feature** points over the last N completed iterations
+  (N = 3 by default; 10 is assumed until one iteration has completed).
+- Iterations are automatic: length (1–4 weeks) and start weekday are project
+  settings; nothing needs to be "closed".
+
+| Key | Action |
+|---|---|
+| `c` | new story (in the selected story's panel; `Shift+Enter` saves and keeps the dialog open) |
+| `j` / `k` (or ↓ / ↑) | move selection |
+| `h` / `l` (or ← / →) | switch panel |
+| `Enter` | open selected story |
+| `/` | search title + description |
+| `Esc` | close dialog / drawer / search / selection |
+| `?` | shortcut help |
+
+## Architecture
+
+```
+browser ── Svelte SPA (embedded in the binary via //go:embed)
+   │  JSON over /api/*
+   ▼
+internal/api        HTTP only: routing (net/http ServeMux), middleware, JSON, status codes
+   ▼
+internal/{auth,project,story,velocity,user}   services: all business rules
+internal/iteration                            pure date arithmetic, no I/O
+   ▼
+internal/database   Store interface = generated queries + InTx(); driver specifics
+   ▼
+internal/database/dbgen   sqlc-generated, typed queries   ◀── db/queries/*.sql
+   ▼
+SQLite (WAL)                                              ◀── db/migrations/sqlite/*.sql (goose, embedded)
+```
+
+```
+cmd/tracker/          main: serve | migrate | backup | check | reset-password | healthcheck | version
+internal/api/         handlers, middleware (request id, logging, origin check, trusted proxies)
+internal/auth/        bcrypt passwords, server-side sessions (HMAC-hashed tokens), login rate limit
+internal/config/      TRACKER_* environment → validated Config
+internal/database/    Open/Migrate/InTx/Backup; sqlite.go is the only driver-specific file
+internal/story/       stories, workflow (states.go), ordering (position.go), comments, labels, search
+internal/project/     projects and their iteration settings
+internal/iteration/   Schedule → iteration N, iteration containing t
+internal/velocity/    velocity + iteration history from accepted stories
+db/                   migrations, queries, sqlc.yaml
+web/                  Svelte app; web/embed.go embeds web/dist
+scripts/ deploy/      installation, deploy, update, backup, restore; systemd unit, env example
+```
+
+Design decisions worth knowing:
+
+- **Iterations are computed, not stored.** Iteration 1 starts on the project's
+  start weekday on or before its creation date; iteration *n* follows by
+  calendar arithmetic (DST-safe) in `TRACKER_TIMEZONE`. History is derived from
+  each story's `accepted_at`.
+- **Ordering** uses sparse integer positions (gap 65 536, midpoint insertion),
+  independently per panel. A drag rewrites exactly one row; when a gap is used
+  up the panel is rebalanced once inside the same transaction. Everything that
+  knows about the strategy is in `internal/story/position.go` (+ the `place`
+  function), so LexoRank-style keys could replace it.
+- **Moves are neighbour-based** (`prev_id` / `next_id`), resolved inside a
+  transaction against the real list, so a stale client cannot corrupt order.
+  State and position change atomically.
+- **Sessions** are random tokens in an HttpOnly, SameSite=Lax cookie; only an
+  HMAC (keyed with the session secret) is stored. State-changing requests with
+  a foreign `Origin` are rejected.
+- **No websockets, no workers.** The board refreshes on tab focus and every
+  60 s while visible; expired sessions are purged on login.
+- **Single team.** Every signed-in user sees every project (no organisations,
+  roles or per-project permissions). Only deleting a project and
+  `/api/system/info` are admin-only.
+
+## Development setup
+
+Requirements: Go ≥ 1.26, Node ≥ 20. No Docker, no database server.
+
+```sh
+git clone <this repository> tracker && cd tracker
+make dev        # API on :3000 + Vite with hot reload on :5173
+```
+
+Open <http://localhost:5173>. Vite proxies `/api` and `/health` to the Go
+server; data lives in `./data`.
+
+```sh
+make test       # go test ./...  +  vitest
+make lint       # go vet, gofmt, svelte-check (+ shellcheck when installed)
+make sqlc       # regenerate internal/database/dbgen after editing db/queries or migrations
+make migrate    # apply migrations to ./data/tracker.db without starting the server
+```
+
+Tests use temporary SQLite databases (`database.NewTestDB`) and cover
+migrations, auth, story creation, state transitions, ordering, moves between
+panels, position normalisation, iterations, velocity and the HTTP API. The
+frontend tests cover the board logic (move requests, optimistic moves, backlog
+projection), the SortableJS adapter, and the story row's workflow buttons.
+
+Adding a migration: create `db/migrations/sqlite/0000N_name.sql` (goose
+format), run `make sqlc`. Migrations are embedded and applied at startup.
+
+## Production build
+
+```sh
+make build      # → bin/tracker   (frontend embedded, static, CGO disabled)
+make release    # → dist/tracker-<version>-linux-{amd64,arm64}.tar.gz + SHA256SUMS
+```
+
+A release archive contains `tracker`, `scripts/`, `deploy/` and this README.
+The installed layout is:
+
+```
+/usr/local/bin/tracker          the application (tracker.previous = rollback copy)
+/etc/tracker/tracker.env        configuration (root:tracker 0640)
+/var/lib/tracker/tracker.db     data (+ -wal/-shm, backups/, session_secret)
+/opt/tracker/scripts/           update.sh, backup.sh, restore.sh, …
+```
+
+The binary serves the frontend on `/`, the API on `/api/*` and `GET /health`
+(`{"status":"ok"}`, checks the database, no authentication).
+
+## Configuration
+
+Environment only; invalid values abort startup with a list of every problem.
+See [`deploy/tracker.env.example`](deploy/tracker.env.example).
+
+| Variable | Default | |
+|---|---|---|
+| `TRACKER_ADDR` | `127.0.0.1:3000` | listen address |
+| `TRACKER_DATA_DIR` | `./data` | created if missing |
+| `TRACKER_DATABASE_DRIVER` | `sqlite` | `postgres` is reserved |
+| `TRACKER_DATABASE_URL` | `$DATA_DIR/tracker.db` | |
+| `TRACKER_PUBLIC_URL` | `http://localhost:<port>/` | decides Secure cookies and the allowed `Origin` |
+| `TRACKER_ALLOW_REGISTRATION` | `true` | the first account can always be created |
+| `TRACKER_SESSION_SECRET` | generated into `$DATA_DIR/session_secret` | ≥ 32 chars |
+| `TRACKER_LOG_LEVEL` | `info` | `debug` also logs `/health` |
+| `TRACKER_TIMEZONE` | `UTC` | where iteration days begin (tzdata is embedded) |
+| `TRACKER_TRUSTED_PROXIES` | `127.0.0.0/8,::1/128` | whose forwarding headers are believed |
+
+Logs are JSON lines on stdout (journald under systemd): `time`, `level`,
+`method`, `path`, `status`, `duration_ms`, `request_id`, `remote_ip`.
+`GET /api/system/info` (admins) reports version, Go version, database driver
+and size, uptime and memory.
+
+## SQLite design
+
+- Pure-Go driver (`modernc.org/sqlite`): no cgo, static binaries, trivial
+  cross-compilation.
+- `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`,
+  `busy_timeout=5000`, 8 MB page cache, at most 4 connections.
+  Transactions begin `IMMEDIATE`, so read-modify-write transactions (moves)
+  queue instead of failing on lock upgrade.
+- Migrations run automatically at startup (goose, embedded SQL).
+- Backups use `VACUUM INTO` (`tracker backup <file>`), which is safe while the
+  server is writing. Never copy a live `tracker.db` without its `-wal`.
+
+## Future PostgreSQL migration
+
+The application layer is already database-agnostic; what it depends on is
+`database.Store` (`dbgen.Querier` + `InTx`). Portability rules the schema and
+queries follow:
+
+- explicit 64-bit integer primary keys, `RETURNING` instead of last-insert-id;
+- timestamps are UTC unix seconds in `BIGINT` columns (no driver-specific time
+  handling); booleans are `BOOLEAN`;
+- no triggers, generated columns, or SQL-side business logic — iterations,
+  velocity and ordering are computed in Go;
+- queries use `sqlc.arg()` / `sqlc.narg()` / `sqlc.slice()`, never `?` or `$1`;
+- search is `LOWER(title || ' ' || description) LIKE …`, identical on both
+  engines, and hidden behind `story.Service.List` should FTS replace it.
+
+To add PostgreSQL:
+
+1. `db/migrations/postgres/00001_init.sql` — the same tables with
+   `BIGINT GENERATED BY DEFAULT AS IDENTITY` keys.
+2. A second block in `db/sqlc.yaml` (`engine: postgresql`, same `queries`
+   directory, `out: ../internal/database/pggen`, with type overrides so nullable
+   columns map to `sql.NullInt64` as they do for SQLite).
+3. `internal/database/postgres.go`: open via `pgx`'s `database/sql` driver, run
+   goose with `DialectPostgres`, implement `Backup` with `pg_dump` or drop it.
+4. Accept `postgres` in `config.Load` and `database.Open`.
+
+Services, handlers, tests and the frontend do not change:
+
+```
+TRACKER_DATABASE_DRIVER=postgres
+TRACKER_DATABASE_URL=postgres://tracker:…@db/tracker
+```
+
+Data moves by exporting each table in id order and importing it (same column
+types), then resetting the identity sequences.
+
+## DigitalOcean / any Debian-Ubuntu server
+
+A 512 MB droplet is plenty. On your workstation:
+
+```sh
+make release
+scp dist/tracker-*-linux-amd64.tar.gz root@droplet:
+```
+
+On the server:
+
+```sh
+tar xzf tracker-*-linux-amd64.tar.gz && cd tracker-*-linux-amd64
+sudo ./scripts/setup.sh --public-url https://track.example.com/ --port 3000
+```
+
+Or do both in one step from your checkout (first run installs, later runs
+deploy): `./scripts/deploy.sh root@droplet -- --public-url https://track.example.com/`
+
+`setup.sh` validates the distribution, installs `ca-certificates curl tar`,
+creates the `tracker` user, `/etc/tracker`, `/var/lib/tracker`, installs the
+binary, writes `tracker.env` (generating a session secret), installs and
+enables the hardened systemd unit, starts it and waits for `/health`. It is
+idempotent: re-running keeps configuration, secret and data, and only changes
+options you pass explicitly. Other sources for the binary: `--binary PATH`,
+`--release-url URL`, `--repo OWNER/NAME [--version TAG]` (GitHub releases; the
+repo is remembered for `update.sh`).
+
+Put TLS in front of it: a Cloudflare Tunnel (below), or Caddy/nginx on the same
+machine with `TRACKER_ADDR=127.0.0.1:3000`. After creating your accounts set
+`TRACKER_ALLOW_REGISTRATION=false` and `systemctl restart tracker`.
+
+## Proxmox LXC installation
+
+On the Proxmox VE host, from an extracted release archive:
+
+```sh
+./scripts/setup-lxc.sh --vmid 120 --hostname tracker --storage local-lvm \
+  --bridge vmbr0 --memory 512 --cores 1 --disk 8 --ip dhcp
+
+# static addressing
+./scripts/setup-lxc.sh --vmid 120 --ip 192.168.1.240/24 --gateway 192.168.1.1 \
+  --public-url https://track.example.com/
+```
+
+It checks that it runs on a PVE host (`pct`, `pvesh`, `pveam`, `pvesm`),
+validates VMID/storage/bridge, downloads the newest Debian standard template if
+needed, creates an **unprivileged** container (defaults: 1 core, 512 MB RAM,
+512 MB swap, 8 GB disk, start on boot), waits for the network, pushes the
+release in, runs the normal `setup.sh` inside and prints the container id, IP,
+URL and service status. `--help` lists every option (`--vlan`, `--nameserver`,
+`--ssh-keys`, `--template`, `--release`, `--release-url`, `--timezone`, …).
+
+No Docker and **no nesting**: systemd's mount-namespace sandboxing
+(`ProtectSystem=`, `PrivateTmp=` …) is not available in an unprivileged
+container without nesting, so `setup.sh` probes for it with `systemd-run` and,
+only if the probe fails, installs
+`/etc/systemd/system/tracker.service.d/10-no-namespaces.conf`, which turns off
+just those directives. The service still runs as the unprivileged `tracker`
+user with no capabilities, inside an unprivileged container. If you prefer the
+full sandbox, pass `--nesting` and re-run `setup.sh` in the container.
+
+## Docker installation
+
+Optional. One container, no database container:
+
+```sh
+docker compose up -d --build      # or: make docker && docker compose up -d
+```
+
+Data is in `./data`. The image is `distroless/static` plus the binary (no
+shell); the health check is `tracker healthcheck`. It runs as root by default
+so the bind mount works regardless of ownership; to drop root,
+`chown 65532:65532 data` and uncomment `user:` in `docker-compose.yml`.
+Backup: `docker compose exec tracker tracker backup /var/lib/tracker/backup-$(date +%F).db`.
+
+## Cloudflare Tunnel
+
+```
+Public hostname:  track.example.com
+Origin service:   http://192.168.1.240:3000
+Tracker:          TRACKER_PUBLIC_URL=https://track.example.com/
+```
+
+Tracker does not read `X-Forwarded-Proto`/`-Host` at all: cookie security and
+the CSRF origin check derive from `TRACKER_PUBLIC_URL`. `CF-Connecting-IP` and
+`X-Forwarded-For` are used only for the logged client IP and the login rate
+limiter, and only when the TCP peer is listed in `TRACKER_TRUSTED_PROXIES` —
+direct clients cannot spoof them. If cloudflared runs on another machine, add
+its address. Full walkthrough: [`deploy/cloudflared-example.md`](deploy/cloudflared-example.md).
+
+## Backups and restore
+
+```sh
+sudo /opt/tracker/scripts/backup.sh                  # → /var/backups/tracker/tracker-backup-YYYY-MM-DD-HHMMSS.tar.gz
+sudo /opt/tracker/scripts/backup.sh --output-dir /mnt/nas/tracker --keep 14
+sudo /opt/tracker/scripts/restore.sh /var/backups/tracker/tracker-backup-….tar.gz
+```
+
+The archive holds a consistent `tracker.db` (taken online with `VACUUM INTO`
+and verified with `PRAGMA integrity_check`), `tracker.env` with the session
+secret blanked, a `MANIFEST`, and `uploads/` should that directory ever exist.
+`--include-secrets` keeps the secret (restore with `--with-config` to bring the
+configuration back too); without it a restore simply signs everyone out.
+
+`restore.sh` validates the archive *before* touching anything, stops the
+service, moves the current data to `/var/lib/tracker/pre-restore-<timestamp>/`,
+restores, fixes ownership, starts the service and checks `/health` — and puts
+the previous data back if the restored service is unhealthy.
+
+Nightly cron: `15 3 * * * /opt/tracker/scripts/backup.sh --keep 14 >/dev/null`
+
+## Updates and deploys
+
+On the host:
+
+```sh
+sudo /opt/tracker/scripts/update.sh                              # latest GitHub release (needs TRACKER_REPO, see setup.sh --repo)
+sudo /opt/tracker/scripts/update.sh --version v0.2.0
+sudo /opt/tracker/scripts/update.sh --file tracker-v0.2.0-linux-amd64.tar.gz
+```
+
+It verifies the download (SHA256SUMS when published, and that the binary runs
+on this machine), snapshots the database, keeps the old binary as
+`tracker.previous`, swaps atomically, restarts, polls `/health` for 30 s, and
+on failure restores both the binary and the pre-update snapshot (an older
+binary must not meet a newer schema).
+
+From your workstation: `./scripts/deploy.sh root@192.168.1.240` builds the
+frontend and a Linux binary for the remote architecture, uploads it, snapshots
+the database, stops the service, swaps the binary atomically, starts (migrating
+on startup), verifies `/health`, and rolls back on failure. It never touches
+`/etc/tracker/tracker.env`. Non-root SSH users need passwordless sudo.
+
+## API
+
+JSON over cookies; errors are `{"error": "…"}` with 401/403/404/409/422/429.
+
+```
+POST   /api/auth/register | /api/auth/login | /api/auth/logout
+GET    /api/me            GET /api/users        GET /api/config
+GET    /api/projects      POST /api/projects
+GET    /api/projects/:id  PATCH … DELETE …       (:id may be the numeric id or the slug)
+GET    /api/projects/:id/stories[?q=text | ?section=done]
+POST   /api/projects/:id/stories     {title, type?, estimate?, section?, description?, owner_id?, labels?}
+GET    /api/projects/:id/labels | /iterations | /velocity
+GET    /api/stories/:id              (with comments)
+PATCH  /api/stories/:id              {title, description, type, state, estimate|null, owner_id|null, requester_id, labels}
+DELETE /api/stories/:id
+POST   /api/stories/:id/move         {section, prev_id | next_id}   → {story, renormalized}
+POST   /api/stories/:id/comments     {body}        DELETE /api/comments/:id
+GET    /api/system/info              (admin)
+GET    /health
+```
+
+`GET /api/projects/:id/velocity` →
+`{"velocity":11,"average":11.0,"window":3,"estimated":false,"iterations":[{"number":12,"points":10},…]}`
+
+## Resource usage
+
+Measured on the first working build (linux/amd64, Go 1.27, 13 MB binary),
+`VmRSS`/`VmHWM` from `/proc/<pid>/status`:
+
+| | |
+|---|---|
+| Idle after a restart on an existing database | **15 MB** RSS |
+| Idle after first start (migrations ran) and interactive use of the board | **27 MB** RSS |
+| After a burst of 1 500 sequential API/asset requests (also the peak, `VmHWM`) | 45 MB — the Go runtime hands freed heap back lazily |
+| Startup to listening (existing database) | ~3 ms |
+| Idle CPU | 0 s of CPU accumulated while idle: no timers or background goroutines, only the HTTP listener |
+
+Targets were < 64 MB idle, < 128 MB typical. Most of the footprint is the Go
+runtime plus the pure-Go SQLite engine; the page cache is capped at 8 MB.
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| Exits at once with `invalid configuration:` | Every bad `TRACKER_*` value is listed; fix `/etc/tracker/tracker.env`. `journalctl -u tracker -n 50` |
+| `status=226/NAMESPACE` in an LXC | Sandbox needs mount namespaces. Re-run `setup.sh` (installs the drop-in) or enable nesting. |
+| Login "works" but you are signed out immediately | `TRACKER_PUBLIC_URL` is `https://…` but you browse over plain `http://` — Secure cookies are not stored. Use the public URL, or set an `http://` URL for LAN-only installs. |
+| `403 cross-origin request rejected` | The page's origin is neither `TRACKER_PUBLIC_URL` nor the request's Host. Fix the public URL; make your reverse proxy pass `Host` through. |
+| Every request logs the proxy's IP | Add the proxy to `TRACKER_TRUSTED_PROXIES`. |
+| `429` on login | 20 attempts per 5 minutes per client IP; wait, or restart the service. |
+| Forgotten password | On the server: `sudo -u tracker sh -c 'set -a; . /etc/tracker/tracker.env; exec tracker reset-password you@example.com'` (reads the new password from stdin, revokes sessions). |
+| "registration is disabled" | `TRACKER_ALLOW_REGISTRATION=false` and an account exists. Enable it briefly to add a teammate. |
+| `database is locked` | Another process holds a long write lock (an open `sqlite3` shell?). Tracker waits 5 s. |
+| `attempt to write a readonly database` after running tools as root | Root created `-wal`/`-shm` files: `chown -R tracker:tracker /var/lib/tracker`. The scripts avoid this by running as `tracker`. |
+| Blank page: "built without the frontend" | The binary was built before `make frontend`; use `make build`. |
+| Iteration boundaries feel off by hours | Set `TRACKER_TIMEZONE` (e.g. `America/Los_Angeles`) and restart. |
+
+## Known limitations
+
+- Single team: no organisations, roles or per-project membership. No e-mail,
+  so password resets are done on the server (see Troubleshooting).
+- Changing a project's iteration length or start weekday renumbers past
+  iterations (they are derived, not stored).
+- No real-time push; other people's changes appear on focus or within 60 s.
+- Search is a substring match (`%` and `_` act as wildcards); no ranking.
+- Deleting a story is permanent (no archive/undo); accepted stories cannot be
+  reopened.
+- No attachments, epics, tasks, story blockers, activity history or
+  notifications.
+- PostgreSQL is designed for but not implemented.
+- The Svelte UI is desktop-first; on narrow screens the panels scroll sideways.

@@ -141,3 +141,30 @@ func TestLimiter(t *testing.T) {
 		t.Fatal("window should have reset")
 	}
 }
+
+func TestSetPassword(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newService(t, true)
+	if _, err := svc.Register(ctx, RegisterInput{Email: "a@example.com", Password: "old password"}); err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := svc.Login(ctx, "a@example.com", "old password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetPassword(ctx, "A@example.com", "new password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Authenticate(ctx, token); apperr.KindOf(err) != apperr.KindUnauthorized {
+		t.Fatalf("old session should be revoked, err = %v", err)
+	}
+	if _, _, err := svc.Login(ctx, "a@example.com", "old password"); apperr.KindOf(err) != apperr.KindUnauthorized {
+		t.Fatalf("old password still works, err = %v", err)
+	}
+	if _, _, err := svc.Login(ctx, "a@example.com", "new password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetPassword(ctx, "nobody@example.com", "new password"); apperr.KindOf(err) != apperr.KindNotFound {
+		t.Fatalf("unknown user: err = %v", err)
+	}
+}

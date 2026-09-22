@@ -95,6 +95,15 @@ func (q *Queries) DeleteSession(ctx context.Context, tokenHash string) error {
 	return err
 }
 
+const deleteUserSessions = `-- name: DeleteUserSessions :exec
+DELETE FROM sessions WHERE user_id = ?1
+`
+
+func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteUserSessions, userID)
+	return err
+}
+
 const getSessionUser = `-- name: GetSessionUser :one
 SELECT users.id, users.email, users.password_hash, users.display_name, users.is_admin, users.created_at, users.updated_at
 FROM sessions
@@ -194,4 +203,19 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users SET password_hash = ?1, updated_at = ?2 WHERE id = ?3
+`
+
+type UpdateUserPasswordParams struct {
+	PasswordHash string
+	Now          int64
+	ID           int64
+}
+
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserPassword, arg.PasswordHash, arg.Now, arg.ID)
+	return err
 }

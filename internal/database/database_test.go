@@ -67,6 +67,12 @@ func TestBackupProducesUsableCopy(t *testing.T) {
 	if err := d.Backup(ctx, dest); err != nil {
 		t.Fatal(err)
 	}
+	if v, err := VerifySQLiteFile(ctx, dest); err != nil || v < 1 {
+		t.Fatalf("VerifySQLiteFile = %d, %v", v, err)
+	}
+	if _, err := VerifySQLiteFile(ctx, filepath.Join(t.TempDir(), "missing.db")); err == nil {
+		t.Fatal("expected an error for a missing file")
+	}
 	copyDB, err := Open(ctx, config.DriverSQLite, dest)
 	if err != nil {
 		t.Fatal(err)

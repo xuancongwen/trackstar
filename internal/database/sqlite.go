@@ -91,3 +91,31 @@ func (d *DB) Health(ctx context.Context) error {
 	var one int
 	return d.sql.QueryRowContext(ctx, "SELECT 1").Scan(&one)
 }
+
+// VerifySQLiteFile checks a database file that is not in use (a backup about
+// to be restored): it must pass SQLite's integrity check and contain a
+// tracker schema. It returns the schema version found.
+func VerifySQLiteFile(ctx context.Context, path string) (int64, error) {
+	if _, err := os.Stat(path); err != nil {
+		return 0, err
+	}
+	sqlDB, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		return 0, err
+	}
+	defer sqlDB.Close()
+
+	var result string
+	if err := sqlDB.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&result); err != nil {
+		return 0, fmt.Errorf("integrity check: %w", err)
+	}
+	if result != "ok" {
+		return 0, fmt.Errorf("integrity check failed: %s", result)
+	}
+	var version int64
+	err = sqlDB.QueryRowContext(ctx, "SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied").Scan(&version)
+	if err != nil {
+		return 0, fmt.Errorf("not a tracker database: %w", err)
+	}
+	return version, nil
+}

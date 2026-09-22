@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 GOFLAGS := -trimpath
-SQLC    := go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0
+SQLC    := go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
 PLATFORMS ?= linux/amd64 linux/arm64
 
 .PHONY: dev backend frontend build test lint migrate release sqlc docker clean
@@ -57,7 +57,7 @@ release: frontend
 		mkdir -p dist/$$name && \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/$$name/tracker ./cmd/tracker && \
 		cp -r scripts deploy README.md dist/$$name/ && \
-		tar -C dist -czf dist/$$name.tar.gz $$name && rm -rf dist/$$name || exit 1; \
+		tar -C dist --owner=0 --group=0 -czf dist/$$name.tar.gz $$name && rm -rf dist/$$name || exit 1; \
 	done
 	@cd dist && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS
 
