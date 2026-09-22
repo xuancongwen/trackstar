@@ -525,12 +525,55 @@ endpoint at `/mcp` (Streamable HTTP, stateless), so Claude Code, Claude
 Desktop or any MCP client can read and update the board. It is a thin layer
 over the same services as the REST API: identical access rules, validation,
 activity log and live updates (open boards refresh when an agent changes a
-story). Authenticate with a personal API token from *your name ▸ Account*:
+story).
 
-```sh
-claude mcp add trackstar --transport http https://track.example.com/mcp \
-  --header "Authorization: Bearer tst_…"
-```
+### Setting up access
+
+MCP clients authenticate with a personal API token sent as a bearer. There
+is no OAuth flow: the token is the whole credential, so treat it like a
+password.
+
+1. Sign in to Trackstar in a browser and open *your name ▸ Account*.
+2. Under **API tokens**, give the token a name (e.g. `claude-code`), pick an
+   expiry (or none) and press **Create**. Copy the `tst_…` secret now; it is
+   shown once. The token acts as you: it sees the projects you see and its
+   changes are logged under your name.
+3. Register the endpoint with your client. For Claude Code:
+
+   ```sh
+   claude mcp add trackstar --transport http https://track.example.com/mcp \
+     --header "Authorization: Bearer tst_…"
+   ```
+
+   (`--scope user` makes it available in every project.) For a client that
+   only takes a JSON config or speaks stdio, bridge it with `mcp-remote`:
+
+   ```json
+   {
+     "mcpServers": {
+       "trackstar": {
+         "command": "npx",
+         "args": ["-y", "mcp-remote", "https://track.example.com/mcp",
+                  "--header", "Authorization: Bearer tst_…"]
+       }
+     }
+   }
+   ```
+
+4. Check it from a shell; an authenticated `initialize` answers with the
+   server info, an unauthenticated one with 401:
+
+   ```sh
+   curl -s https://track.example.com/mcp \
+     -H "Authorization: Bearer tst_…" -H "Content-Type: application/json" \
+     -H "Accept: application/json, text/event-stream" \
+     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+   ```
+
+To cut an agent off, revoke the token in the same dialog; its next call
+fails. Give each agent or machine its own token so one can be revoked
+without disturbing the others. Tokens work through the Cloudflare Tunnel
+like any other request; nothing else needs to be opened.
 
 Tools (a project is named by numeric id or slug):
 
