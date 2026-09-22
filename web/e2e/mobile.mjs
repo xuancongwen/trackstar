@@ -28,7 +28,7 @@ try {
   t.eq('no horizontal page overflow', await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
   t.eq('tab strip present, current selected by default', await page.$eval('.tabs button.on', (e) => e.textContent.trim().startsWith('Current')), true)
   t.eq('only the current panel is rendered', await page.$$eval('main .panel, main section', (els) => els.length), 1)
-  t.eq('desktop buttons hidden', await page.$$eval('header.topbar button', (els) => els.map((b) => b.textContent.trim())), ['☰'])
+  t.eq('desktop buttons hidden (project switcher and menu remain)', await page.$$eval('header.topbar button', (els) => els.map((b) => b.textContent.trim())), ['Apollo▾', '☰'])
 
   await tab('Backlog')
   t.eq('backlog tab shows the backlog', await order(page, 'backlog'), ['Add OAuth support', 'Story drag and drop', 'Velocity chart', 'Email notifications'])

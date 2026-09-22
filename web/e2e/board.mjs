@@ -107,6 +107,17 @@ try {
   t.eq('revoked token is rejected', (await bearer('/api/me')).status, 401)
   await page.keyboard.press('Escape')
   t.eq('topbar shows the new name', await page.$eval('.menu > button', (e) => e.textContent.trim()), 'Samantha ▾')
+
+  // --- project switcher (the project name in the top bar)
+  const zephyr = await api('POST', '/api/projects', { name: 'Zephyr' })
+  await page.click('.switcher > button'); await page.waitForSelector('.switcher-items [role="option"]')
+  t.eq('switcher lists every project', await page.$$eval('.switcher-items [role="option"]', (els) => els.map((e) => e.textContent.trim())), ['Apollo', 'Zephyr'])
+  t.eq('current project is marked', await page.$eval('.switcher-items .current', (e) => e.textContent.trim()), 'Apollo')
+  await page.click('.switcher-items [role="option"]:last-of-type')
+  await page.waitForFunction((slug) => location.hash === `#/p/${slug}`, {}, zephyr.slug)
+  await page.waitForSelector('.live.live')
+  t.eq('switching opens the other board', await page.$eval('.switcher > button strong', (e) => e.textContent.trim()), 'Zephyr')
+  t.eq('switcher closed after picking', await page.$('.switcher-items'), null)
 } finally {
   await browser.close()
   trackstar.stop()

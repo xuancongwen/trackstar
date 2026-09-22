@@ -71,6 +71,10 @@
   let showAccount = $state(false)
   let showUsers = $state(false)
   let menuOpen = $state(false)
+  // Project switcher: the project name in the top bar opens a list of all
+  // projects. Loaded lazily the first time it opens.
+  let switcherOpen = $state(false)
+  let allProjects = $state<Project[] | null>(null)
   // Stories changed by others in the last few seconds get a brief highlight.
   let recentIds = $state(new Set<number>())
   let showHelp = $state(false)
@@ -410,9 +414,27 @@
       document.querySelector(`[data-story-id="${selectedId}"]`)?.scrollIntoView({ block: 'nearest' })
   })
 
+  async function toggleSwitcher() {
+    switcherOpen = !switcherOpen
+    if (switcherOpen && allProjects === null) {
+      try {
+        allProjects = await api.projects()
+      } catch (err) {
+        switcherOpen = false
+        fail(err)
+      }
+    }
+  }
+
+  function switchTo(p: Project) {
+    switcherOpen = false
+    if (p.slug !== slug) location.hash = `#/p/${p.slug}`
+  }
+
   function closeTopmost(): boolean {
     if (creating) creating = null
     else if (menuOpen) menuOpen = false
+    else if (switcherOpen) switcherOpen = false
     else if (showAccount) showAccount = false
     else if (showUsers) showUsers = false
     else if (showSettings) showSettings = false
@@ -519,7 +541,34 @@
   <div class="board">
     <header class="topbar" class:mobile>
       <a href="#/" class="home" title="All projects">Trackstar</a>
-      <strong class="project-name">{project.name}</strong>
+      <div class="switcher">
+        <button
+          class="project-name"
+          class:open={switcherOpen}
+          onclick={toggleSwitcher}
+          aria-haspopup="listbox"
+          aria-expanded={switcherOpen}
+          title="Switch project">
+          <strong>{project.name}</strong><span class="caret">▾</span>
+        </button>
+        {#if switcherOpen}
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <div class="menu-backdrop" onclick={() => (switcherOpen = false)}></div>
+          <div class="switcher-items" role="listbox" aria-label="Projects">
+            {#if allProjects === null}
+              <span class="muted">Loading…</span>
+            {:else}
+              {#each allProjects as p (p.id)}
+                <button role="option" aria-selected={p.id === project.id} class:current={p.id === project.id} onclick={() => switchTo(p)}>
+                  {p.name}
+                </button>
+              {/each}
+              <div class="sep"></div>
+              <a href="#/" onclick={() => (switcherOpen = false)}>All projects…</a>
+            {/if}
+          </div>
+        {/if}
+      </div>
       {#if velocity}
         <span class="velocity" title={velocity.estimated
           ? 'No completed iteration yet — using the default velocity'
@@ -803,12 +852,12 @@
     padding: 6px 10px;
     gap: 6px;
   }
-  .topbar.mobile .project-name {
+  .topbar.mobile .switcher {
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  }
+  .topbar.mobile .project-name {
+    max-width: 100%;
   }
   .topbar.mobile .velocity {
     display: none;
@@ -970,6 +1019,78 @@
   }
   .menu-items button:hover {
     background: var(--row-hover);
+  }
+  .switcher {
+    position: relative;
+    min-width: 0;
+  }
+  .topbar button.project-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 320px;
+    padding: 2px 6px;
+    margin-left: -6px;
+    border-color: transparent;
+    font-size: inherit;
+  }
+  .topbar button.project-name:hover,
+  .topbar button.project-name.open {
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+  .project-name strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .project-name .caret {
+    opacity: 0.6;
+    font-size: 11px;
+  }
+  .switcher-items {
+    position: absolute;
+    left: 0;
+    top: calc(100% + 4px);
+    z-index: 26;
+    display: grid;
+    min-width: 200px;
+    max-width: min(360px, 90vw);
+    max-height: 60vh;
+    overflow-y: auto;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+    padding: 4px;
+  }
+  .switcher-items button,
+  .switcher-items a {
+    text-align: left;
+    border: 0;
+    border-radius: 4px;
+    color: var(--text);
+    padding: 6px 10px;
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .switcher-items button:hover,
+  .switcher-items a:hover {
+    background: var(--row-hover);
+  }
+  .switcher-items button.current {
+    font-weight: 600;
+    background: var(--row);
+  }
+  .switcher-items .sep {
+    border-top: 1px solid var(--border);
+    margin: 3px 0;
+  }
+  .switcher-items .muted {
+    padding: 6px 10px;
   }
   .load-error {
     padding: 40px;
