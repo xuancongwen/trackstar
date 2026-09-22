@@ -18,23 +18,29 @@ import (
 )
 
 type Story struct {
-	ID           int64      `json:"id"`
-	ProjectID    int64      `json:"project_id"`
-	Title        string     `json:"title"`
-	Description  string     `json:"description"`
-	Type         Type       `json:"type"`
-	State        State      `json:"state"`
-	Section      Section    `json:"section"`
-	Estimate     *int64     `json:"estimate"`
-	Position     int64      `json:"position"`
-	RequesterID  int64      `json:"requester_id"`
-	OwnerID      *int64     `json:"owner_id"`
-	Labels       []string   `json:"labels"`
-	CommentCount int64      `json:"comment_count"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	AcceptedAt   *time.Time `json:"accepted_at"`
-	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
+	ID           int64    `json:"id"`
+	ProjectID    int64    `json:"project_id"`
+	Title        string   `json:"title"`
+	Description  string   `json:"description"`
+	Type         Type     `json:"type"`
+	State        State    `json:"state"`
+	Section      Section  `json:"section"`
+	Estimate     *int64   `json:"estimate"`
+	Position     int64    `json:"position"`
+	RequesterID  int64    `json:"requester_id"`
+	OwnerID      *int64   `json:"owner_id"`
+	Labels       []string `json:"labels"`
+	CommentCount int64    `json:"comment_count"`
+	TaskCount    int64    `json:"task_count"`
+	TasksDone    int64    `json:"tasks_done"`
+	// BlockedBy lists stories this one waits on; Blocked is true while any
+	// of them is not yet accepted (and not deleted).
+	BlockedBy  []int64    `json:"blocked_by"`
+	Blocked    bool       `json:"blocked"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	AcceptedAt *time.Time `json:"accepted_at"`
+	DeletedAt  *time.Time `json:"deleted_at,omitempty"`
 }
 
 // Activity is one recorded change to a story.
@@ -68,6 +74,7 @@ type Detail struct {
 	Story
 	Comments []Comment  `json:"comments"`
 	Activity []Activity `json:"activity"`
+	Tasks    []Task     `json:"tasks"`
 }
 
 type CreateInput struct {
@@ -90,6 +97,7 @@ type UpdateInput struct {
 	OwnerID     Opt[int64] `json:"owner_id"`
 	RequesterID *int64     `json:"requester_id"`
 	Labels      *[]string  `json:"labels"`
+	BlockedBy   *[]int64   `json:"blocked_by"`
 }
 
 // MoveInput places a story in a section relative to a neighbour: after
@@ -219,6 +227,9 @@ func (s *Service) Get(ctx context.Context, id int64) (Detail, error) {
 	if err != nil {
 		return Detail{}, err
 	}
+	if d.Tasks, err = s.Tasks(ctx, id); err != nil {
+		return Detail{}, err
+	}
 	for _, a := range acts {
 		d.Activity = append(d.Activity, Activity{
 			ID: a.ID, StoryID: a.StoryID, UserID: a.UserID, Kind: a.Kind, OldValue: a.OldValue, NewValue: a.NewValue,
@@ -272,6 +283,27 @@ func (s *Service) List(ctx context.Context, projectID int64, opts ListOptions) (
 	for _, c := range countRows {
 		counts[c.StoryID] = c.Total
 	}
+	taskRows, err := s.store.CountTasksByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	tasks := map[int64][2]int64{}
+	for _, t := range taskRows {
+		tasks[t.StoryID] = [2]int64{t.Total, toInt64(t.Done)}
+	}
+	blockerRows, err := s.store.ListProjectBlockers(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	blockers := map[int64][]int64{}
+	for _, b := range blockerRows {
+		blockers[b.StoryID] = append(blockers[b.StoryID], b.BlockerID)
+	}
+	// A blocker that is not in the active list is done (or deleted): not blocking.
+	active := map[int64]State{}
+	for _, r := range rows {
+		active[r.ID] = State(r.State)
+	}
 
 	out := make([]Story, len(rows))
 	for i, r := range rows {
@@ -280,6 +312,15 @@ func (s *Service) List(ctx context.Context, projectID int64, opts ListOptions) (
 			out[i].Labels = l
 		}
 		out[i].CommentCount = counts[r.ID]
+		out[i].TaskCount, out[i].TasksDone = tasks[r.ID][0], tasks[r.ID][1]
+		if b := blockers[r.ID]; b != nil {
+			out[i].BlockedBy = b
+			for _, id := range b {
+				if st, ok := active[id]; ok && st != StateAccepted {
+					out[i].Blocked = true
+				}
+			}
+		}
 	}
 	return out, nil
 }
@@ -386,6 +427,11 @@ func (s *Service) Update(ctx context.Context, id int64, actor Actor, in UpdateIn
 
 		if in.Labels != nil {
 			if err := setLabels(ctx, q, row.ProjectID, row.ID, *in.Labels); err != nil {
+				return err
+			}
+		}
+		if in.BlockedBy != nil {
+			if err := setBlockers(ctx, q, row, *in.BlockedBy); err != nil {
 				return err
 			}
 		}
@@ -681,6 +727,33 @@ func (s *Service) load(ctx context.Context, q dbgen.Querier, row dbgen.Story) (S
 		return Story{}, err
 	}
 	st.Labels = labels
+	blockers, err := q.ListStoryBlockers(ctx, row.ID)
+	if err != nil {
+		return Story{}, err
+	}
+	for _, id := range blockers {
+		b, err := q.GetStory(ctx, id)
+		if err != nil {
+			return Story{}, err
+		}
+		if b.DeletedAt.Valid {
+			continue
+		}
+		st.BlockedBy = append(st.BlockedBy, id)
+		if State(b.State) != StateAccepted {
+			st.Blocked = true
+		}
+	}
+	tasks, err := q.ListTasks(ctx, row.ID)
+	if err != nil {
+		return Story{}, err
+	}
+	st.TaskCount = int64(len(tasks))
+	for _, t := range tasks {
+		if t.Done {
+			st.TasksDone++
+		}
+	}
 	return st, nil
 }
 
@@ -704,6 +777,7 @@ func fromRow(r dbgen.Story, currentStart time.Time) Story {
 		Position:    r.Position,
 		RequesterID: r.RequesterID,
 		Labels:      []string{},
+		BlockedBy:   []int64{},
 		CreatedAt:   time.Unix(r.CreatedAt, 0).UTC(),
 		UpdatedAt:   time.Unix(r.UpdatedAt, 0).UTC(),
 	}
@@ -815,4 +889,115 @@ func equalNullInt(a sql.NullInt64, b *int64) bool {
 		return !a.Valid
 	}
 	return a.Valid && a.Int64 == *b
+}
+
+// MoveMany places several stories, in the given order, at one drop point in
+// one transaction. Rules are the same as for Move; if any story cannot be
+// moved nothing changes.
+func (s *Service) MoveMany(ctx context.Context, ids []int64, actorID int64, in MoveInput) ([]Story, error) {
+	if len(ids) == 0 || len(ids) > 200 {
+		return nil, apperr.Invalid("move between 1 and 200 stories at a time")
+	}
+	if in.Section != SectionIcebox && in.Section != SectionBacklog && in.Section != SectionCurrent {
+		return nil, apperr.Invalid("section must be icebox, backlog or current")
+	}
+	out := make([]Story, 0, len(ids))
+	err := s.store.InTx(ctx, func(q dbgen.Querier) error {
+		seen := map[int64]bool{}
+		moving := map[int64]bool{}
+		for _, id := range ids {
+			moving[id] = true
+		}
+		if (in.PrevID != nil && moving[*in.PrevID]) || (in.NextID != nil && moving[*in.NextID]) {
+			return apperr.Invalid("the drop target cannot be one of the moved stories")
+		}
+		var projectID int64
+		prev := in.PrevID
+		for i, id := range ids {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			row, err := q.GetStory(ctx, id)
+			if err != nil {
+				return notFound(err, "story")
+			}
+			if i == 0 {
+				projectID = row.ProjectID
+			} else if row.ProjectID != projectID {
+				return apperr.Invalid("stories must belong to the same project")
+			}
+			state := State(row.State)
+			switch {
+			case row.DeletedAt.Valid:
+				return apperr.Invalid("#%d is in the trash", id)
+			case state == StateAccepted:
+				return apperr.Invalid("#%d is accepted and cannot be moved", id)
+			case inProgress(state) && in.Section != SectionCurrent:
+				return apperr.Invalid("#%d is %s and stays in the current iteration", id, state)
+			}
+			if SectionOf(state) != in.Section {
+				row.State = string(entryState(in.Section))
+				if err := s.record(ctx, q, row.ID, actorID, "moved", string(SectionOf(state)), string(in.Section)); err != nil {
+					return err
+				}
+			}
+			// Each story goes right after the previous one placed; only the first
+			// uses the caller's next_id (when there is no prev_id).
+			where := placement{prevID: prev}
+			if prev == nil {
+				where.nextID = in.NextID
+			}
+			pos, renormalized, err := place(ctx, q, row.ProjectID, in.Section, row.ID, where)
+			if err != nil {
+				return err
+			}
+			if renormalized {
+				s.Rebalances.Add(1)
+			}
+			row.Position = pos
+			st, err := s.save(ctx, q, row)
+			if err != nil {
+				return err
+			}
+			out = append(out, st)
+			prev = &row.ID
+		}
+		return nil
+	})
+	return out, err
+}
+
+// ProjectOfStory, ProjectOfComment and ProjectOfTask resolve ownership for
+// access checks without loading the whole story.
+func (s *Service) ProjectOfStory(ctx context.Context, id int64) (int64, error) {
+	row, err := s.store.GetStory(ctx, id)
+	if err != nil {
+		return 0, notFound(err, "story")
+	}
+	return row.ProjectID, nil
+}
+
+func (s *Service) ProjectOfComment(ctx context.Context, id int64) (int64, error) {
+	c, err := s.store.GetComment(ctx, id)
+	if err != nil {
+		return 0, notFound(err, "comment")
+	}
+	return s.ProjectOfStory(ctx, c.StoryID)
+}
+
+func (s *Service) ProjectOfTask(ctx context.Context, id int64) (int64, error) {
+	t, err := s.store.GetTask(ctx, id)
+	if err != nil {
+		return 0, notFound(err, "task")
+	}
+	return s.ProjectOfStory(ctx, t.StoryID)
+}
+
+func (s *Service) ProjectOfEpic(ctx context.Context, id int64) (int64, error) {
+	l, err := s.store.GetLabel(ctx, id)
+	if err != nil || !l.IsEpic {
+		return 0, notFound(errOrNotFound(err), "epic")
+	}
+	return l.ProjectID, nil
 }

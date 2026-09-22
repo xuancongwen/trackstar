@@ -39,7 +39,7 @@ func (s *Server) publish(r *http.Request, typ string, projectID, storyID int64) 
 // handleEvents streams project changes as Server-Sent Events. Events carry no
 // payload beyond ids; the client refetches the story list, which is a few KB.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r)
+	p, err := s.projectFromPath(r, false)
 	if err != nil {
 		s.fail(w, r, err)
 		return

@@ -10,33 +10,47 @@ import (
 )
 
 type Querier interface {
+	AddStoryBlocker(ctx context.Context, arg AddStoryBlockerParams) error
 	AddStoryLabel(ctx context.Context, arg AddStoryLabelParams) error
+	ClearStoryBlockers(ctx context.Context, storyID int64) error
 	ClearStoryLabels(ctx context.Context, storyID int64) error
 	CountActiveAdmins(ctx context.Context) (int64, error)
 	CountCommentsByProject(ctx context.Context, projectID int64) ([]CountCommentsByProjectRow, error)
+	CountProjectMembers(ctx context.Context, projectID int64) (int64, error)
 	// Live (not deleted) story counts per project and state, for system info.
 	CountStoriesByState(ctx context.Context) ([]CountStoriesByStateRow, error)
+	CountTasksByProject(ctx context.Context, projectID int64) ([]CountTasksByProjectRow, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateActivity(ctx context.Context, arg CreateActivityParams) error
 	CreateComment(ctx context.Context, arg CreateCommentParams) (Comment, error)
+	CreateEpic(ctx context.Context, arg CreateEpicParams) (Label, error)
 	CreateLabel(ctx context.Context, arg CreateLabelParams) (Label, error)
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
+	CreateSavedFilter(ctx context.Context, arg CreateSavedFilterParams) (SavedFilter, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) error
 	CreateStory(ctx context.Context, arg CreateStoryParams) (Story, error)
+	CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteComment(ctx context.Context, id int64) error
 	DeleteExpiredSessions(ctx context.Context, now int64) error
 	DeleteProject(ctx context.Context, id int64) error
+	DeleteProjectMember(ctx context.Context, arg DeleteProjectMemberParams) error
+	DeleteSavedFilter(ctx context.Context, arg DeleteSavedFilterParams) (int64, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
 	DeleteStory(ctx context.Context, id int64) error
+	DeleteTask(ctx context.Context, id int64) error
+	// Plain labels disappear with their last story; epics are kept until demoted.
 	DeleteUnusedLabels(ctx context.Context, projectID int64) error
 	DeleteUserSessions(ctx context.Context, userID int64) error
 	GetComment(ctx context.Context, id int64) (Comment, error)
+	GetLabel(ctx context.Context, id int64) (Label, error)
 	GetLabelByName(ctx context.Context, arg GetLabelByNameParams) (Label, error)
 	GetProject(ctx context.Context, id int64) (Project, error)
 	GetProjectBySlug(ctx context.Context, slug string) (Project, error)
+	GetProjectMember(ctx context.Context, arg GetProjectMemberParams) (string, error)
 	GetSessionUser(ctx context.Context, arg GetSessionUserParams) (User, error)
 	GetStory(ctx context.Context, id int64) (Story, error)
+	GetTask(ctx context.Context, id int64) (Task, error)
 	GetUser(ctx context.Context, id int64) (User, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	ListAcceptedStories(ctx context.Context, arg ListAcceptedStoriesParams) ([]Story, error)
@@ -46,14 +60,24 @@ type Querier interface {
 	ListActivity(ctx context.Context, storyID int64) ([]Activity, error)
 	ListComments(ctx context.Context, storyID int64) ([]Comment, error)
 	ListDeletedStories(ctx context.Context, projectID int64) ([]Story, error)
+	// Live stories per label with what progress needs.
+	ListLabelStoryStats(ctx context.Context, projectID int64) ([]ListLabelStoryStatsRow, error)
 	ListLabels(ctx context.Context, projectID int64) ([]Label, error)
+	ListProjectBlockers(ctx context.Context, projectID int64) ([]StoryBlocker, error)
+	ListProjectMembers(ctx context.Context, projectID int64) ([]ListProjectMembersRow, error)
 	ListProjectStoryLabels(ctx context.Context, projectID int64) ([]ListProjectStoryLabelsRow, error)
 	ListProjects(ctx context.Context) ([]Project, error)
+	// Projects visible to a user: those with no members at all, or where the user is one.
+	ListProjectsForUser(ctx context.Context, userID int64) ([]Project, error)
+	ListSavedFilters(ctx context.Context, arg ListSavedFiltersParams) ([]SavedFilter, error)
 	// Ordered ids/positions for one ordering scope. The caller passes the states
 	// that make up the section (see story.Section).
 	ListSectionPositions(ctx context.Context, arg ListSectionPositionsParams) ([]ListSectionPositionsRow, error)
+	ListStoryBlockers(ctx context.Context, storyID int64) ([]int64, error)
 	ListStoryLabels(ctx context.Context, storyID int64) ([]string, error)
+	ListTasks(ctx context.Context, storyID int64) ([]Task, error)
 	ListUsers(ctx context.Context) ([]User, error)
+	MaxTaskPosition(ctx context.Context, storyID int64) (interface{}, error)
 	PurgeDeletedStories(ctx context.Context, before sql.NullInt64) (int64, error)
 	// The pattern ('%term%', lower-cased) is built in Go; LOWER() keeps behaviour
 	// identical between SQLite and PostgreSQL. sqlc's SQLite parser has no ESCAPE
@@ -61,10 +85,13 @@ type Querier interface {
 	SearchStories(ctx context.Context, arg SearchStoriesParams) ([]Story, error)
 	SetStoryDeleted(ctx context.Context, arg SetStoryDeletedParams) error
 	SetStoryPosition(ctx context.Context, arg SetStoryPositionParams) error
+	UpdateLabel(ctx context.Context, arg UpdateLabelParams) (Label, error)
 	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)
 	UpdateStory(ctx context.Context, arg UpdateStoryParams) (Story, error)
+	UpdateTask(ctx context.Context, arg UpdateTaskParams) (Task, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
+	UpsertProjectMember(ctx context.Context, arg UpsertProjectMemberParams) error
 }
 
 var _ Querier = (*Queries)(nil)

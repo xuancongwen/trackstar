@@ -222,6 +222,8 @@ func apply(p *Project, in Input) error {
 
 // Slugify lower-cases name and collapses everything that is not a letter or
 // digit into single dashes.
+func trimSpaces(v string) string { return strings.Join(strings.Fields(v), " ") }
+
 func Slugify(name string) string {
 	var b strings.Builder
 	dash := false

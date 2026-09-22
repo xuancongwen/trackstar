@@ -28,7 +28,31 @@ JOIN labels ON labels.id = story_labels.label_id
 WHERE labels.project_id = sqlc.arg(project_id)
 ORDER BY labels.name;
 
+-- Plain labels disappear with their last story; epics are kept until demoted.
 -- name: DeleteUnusedLabels :exec
 DELETE FROM labels
 WHERE labels.project_id = sqlc.arg(project_id)
+  AND NOT labels.is_epic
   AND NOT EXISTS (SELECT 1 FROM story_labels WHERE story_labels.label_id = labels.id);
+
+-- name: GetLabel :one
+SELECT * FROM labels WHERE id = sqlc.arg(id);
+
+-- name: UpdateLabel :one
+UPDATE labels
+SET name = sqlc.arg(name), description = sqlc.arg(description), is_epic = sqlc.arg(is_epic)
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: CreateEpic :one
+INSERT INTO labels (project_id, name, description, is_epic)
+VALUES (sqlc.arg(project_id), sqlc.arg(name), sqlc.arg(description), TRUE)
+RETURNING *;
+
+-- Live stories per label with what progress needs.
+-- name: ListLabelStoryStats :many
+SELECT story_labels.label_id, stories.type, stories.state, stories.estimate
+FROM story_labels
+JOIN stories ON stories.id = story_labels.story_id
+JOIN labels ON labels.id = story_labels.label_id
+WHERE labels.project_id = sqlc.arg(project_id) AND stories.deleted_at IS NULL;

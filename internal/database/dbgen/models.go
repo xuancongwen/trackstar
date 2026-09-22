@@ -28,9 +28,11 @@ type Comment struct {
 }
 
 type Label struct {
-	ID        int64
-	ProjectID int64
-	Name      string
+	ID          int64
+	ProjectID   int64
+	Name        string
+	IsEpic      bool
+	Description string
 }
 
 type Project struct {
@@ -43,6 +45,21 @@ type Project struct {
 	VelocityWindow        int64
 	CreatedAt             int64
 	UpdatedAt             int64
+}
+
+type ProjectMember struct {
+	ProjectID int64
+	UserID    int64
+	Role      string
+}
+
+type SavedFilter struct {
+	ID        int64
+	UserID    int64
+	ProjectID int64
+	Name      string
+	Query     string
+	CreatedAt int64
 }
 
 type Session struct {
@@ -70,9 +87,24 @@ type Story struct {
 	DeletedAt   sql.NullInt64
 }
 
+type StoryBlocker struct {
+	StoryID   int64
+	BlockerID int64
+}
+
 type StoryLabel struct {
 	StoryID int64
 	LabelID int64
+}
+
+type Task struct {
+	ID          int64
+	StoryID     int64
+	Description string
+	Done        bool
+	Position    int64
+	CreatedAt   int64
+	UpdatedAt   int64
 }
 
 type User struct {

@@ -7,6 +7,7 @@ package dbgen
 
 import (
 	"context"
+	"database/sql"
 )
 
 const addStoryLabel = `-- name: AddStoryLabel :exec
@@ -32,9 +33,34 @@ func (q *Queries) ClearStoryLabels(ctx context.Context, storyID int64) error {
 	return err
 }
 
+const createEpic = `-- name: CreateEpic :one
+INSERT INTO labels (project_id, name, description, is_epic)
+VALUES (?1, ?2, ?3, TRUE)
+RETURNING id, project_id, name, is_epic, description
+`
+
+type CreateEpicParams struct {
+	ProjectID   int64
+	Name        string
+	Description string
+}
+
+func (q *Queries) CreateEpic(ctx context.Context, arg CreateEpicParams) (Label, error) {
+	row := q.db.QueryRowContext(ctx, createEpic, arg.ProjectID, arg.Name, arg.Description)
+	var i Label
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.IsEpic,
+		&i.Description,
+	)
+	return i, err
+}
+
 const createLabel = `-- name: CreateLabel :one
 INSERT INTO labels (project_id, name) VALUES (?1, ?2)
-RETURNING id, project_id, name
+RETURNING id, project_id, name, is_epic, description
 `
 
 type CreateLabelParams struct {
@@ -45,23 +71,48 @@ type CreateLabelParams struct {
 func (q *Queries) CreateLabel(ctx context.Context, arg CreateLabelParams) (Label, error) {
 	row := q.db.QueryRowContext(ctx, createLabel, arg.ProjectID, arg.Name)
 	var i Label
-	err := row.Scan(&i.ID, &i.ProjectID, &i.Name)
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.IsEpic,
+		&i.Description,
+	)
 	return i, err
 }
 
 const deleteUnusedLabels = `-- name: DeleteUnusedLabels :exec
 DELETE FROM labels
 WHERE labels.project_id = ?1
+  AND NOT labels.is_epic
   AND NOT EXISTS (SELECT 1 FROM story_labels WHERE story_labels.label_id = labels.id)
 `
 
+// Plain labels disappear with their last story; epics are kept until demoted.
 func (q *Queries) DeleteUnusedLabels(ctx context.Context, projectID int64) error {
 	_, err := q.db.ExecContext(ctx, deleteUnusedLabels, projectID)
 	return err
 }
 
+const getLabel = `-- name: GetLabel :one
+SELECT id, project_id, name, is_epic, description FROM labels WHERE id = ?1
+`
+
+func (q *Queries) GetLabel(ctx context.Context, id int64) (Label, error) {
+	row := q.db.QueryRowContext(ctx, getLabel, id)
+	var i Label
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.IsEpic,
+		&i.Description,
+	)
+	return i, err
+}
+
 const getLabelByName = `-- name: GetLabelByName :one
-SELECT id, project_id, name FROM labels WHERE project_id = ?1 AND name = ?2
+SELECT id, project_id, name, is_epic, description FROM labels WHERE project_id = ?1 AND name = ?2
 `
 
 type GetLabelByNameParams struct {
@@ -72,12 +123,62 @@ type GetLabelByNameParams struct {
 func (q *Queries) GetLabelByName(ctx context.Context, arg GetLabelByNameParams) (Label, error) {
 	row := q.db.QueryRowContext(ctx, getLabelByName, arg.ProjectID, arg.Name)
 	var i Label
-	err := row.Scan(&i.ID, &i.ProjectID, &i.Name)
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.IsEpic,
+		&i.Description,
+	)
 	return i, err
 }
 
+const listLabelStoryStats = `-- name: ListLabelStoryStats :many
+SELECT story_labels.label_id, stories.type, stories.state, stories.estimate
+FROM story_labels
+JOIN stories ON stories.id = story_labels.story_id
+JOIN labels ON labels.id = story_labels.label_id
+WHERE labels.project_id = ?1 AND stories.deleted_at IS NULL
+`
+
+type ListLabelStoryStatsRow struct {
+	LabelID  int64
+	Type     string
+	State    string
+	Estimate sql.NullInt64
+}
+
+// Live stories per label with what progress needs.
+func (q *Queries) ListLabelStoryStats(ctx context.Context, projectID int64) ([]ListLabelStoryStatsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listLabelStoryStats, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLabelStoryStatsRow{}
+	for rows.Next() {
+		var i ListLabelStoryStatsRow
+		if err := rows.Scan(
+			&i.LabelID,
+			&i.Type,
+			&i.State,
+			&i.Estimate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLabels = `-- name: ListLabels :many
-SELECT id, project_id, name FROM labels WHERE project_id = ?1 ORDER BY name
+SELECT id, project_id, name, is_epic, description FROM labels WHERE project_id = ?1 ORDER BY name
 `
 
 func (q *Queries) ListLabels(ctx context.Context, projectID int64) ([]Label, error) {
@@ -89,7 +190,13 @@ func (q *Queries) ListLabels(ctx context.Context, projectID int64) ([]Label, err
 	items := []Label{}
 	for rows.Next() {
 		var i Label
-		if err := rows.Scan(&i.ID, &i.ProjectID, &i.Name); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Name,
+			&i.IsEpic,
+			&i.Description,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -168,4 +275,36 @@ func (q *Queries) ListStoryLabels(ctx context.Context, storyID int64) ([]string,
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateLabel = `-- name: UpdateLabel :one
+UPDATE labels
+SET name = ?1, description = ?2, is_epic = ?3
+WHERE id = ?4
+RETURNING id, project_id, name, is_epic, description
+`
+
+type UpdateLabelParams struct {
+	Name        string
+	Description string
+	IsEpic      bool
+	ID          int64
+}
+
+func (q *Queries) UpdateLabel(ctx context.Context, arg UpdateLabelParams) (Label, error) {
+	row := q.db.QueryRowContext(ctx, updateLabel,
+		arg.Name,
+		arg.Description,
+		arg.IsEpic,
+		arg.ID,
+	)
+	var i Label
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.IsEpic,
+		&i.Description,
+	)
+	return i, err
 }
