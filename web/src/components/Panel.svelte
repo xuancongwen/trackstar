@@ -13,6 +13,7 @@
     users: Map<number, User>
     selectedId: number | null
     busyIds: Set<number>
+    recentIds?: Set<number>
     summary?: string
     /** Rendered above the sortable list (accepted stories, progress…). */
     top?: Snippet
@@ -33,6 +34,7 @@
     users,
     selectedId,
     busyIds,
+    recentIds = new Set(),
     summary = '',
     top,
     dragDisabled = false,
@@ -83,6 +85,7 @@
             {users}
             selected={row.story.id === selectedId}
             busy={busyIds.has(row.story.id)}
+            recent={recentIds.has(row.story.id)}
             {onopen}
             {onaction}
             {onestimate}

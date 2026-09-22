@@ -24,7 +24,8 @@ SELECT users.*
 FROM sessions
 JOIN users ON users.id = sessions.user_id
 WHERE sessions.token_hash = sqlc.arg(token_hash)
-  AND sessions.expires_at > sqlc.arg(now);
+  AND sessions.expires_at > sqlc.arg(now)
+  AND users.is_active;
 
 -- name: DeleteSession :exec
 DELETE FROM sessions WHERE token_hash = sqlc.arg(token_hash);
@@ -37,3 +38,15 @@ UPDATE users SET password_hash = sqlc.arg(password_hash), updated_at = sqlc.arg(
 
 -- name: DeleteUserSessions :exec
 DELETE FROM sessions WHERE user_id = sqlc.arg(user_id);
+
+-- name: UpdateUser :one
+UPDATE users
+SET display_name = sqlc.arg(display_name),
+    is_admin = sqlc.arg(is_admin),
+    is_active = sqlc.arg(is_active),
+    updated_at = sqlc.arg(now)
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: CountActiveAdmins :one
+SELECT COUNT(*) FROM users WHERE is_admin AND is_active;

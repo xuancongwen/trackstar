@@ -47,6 +47,69 @@ func (q *Queries) CountCommentsByProject(ctx context.Context, projectID int64) (
 	return items, nil
 }
 
+const countStoriesByState = `-- name: CountStoriesByState :many
+SELECT project_id, state, COUNT(*) AS total
+FROM stories
+WHERE deleted_at IS NULL
+GROUP BY project_id, state
+`
+
+type CountStoriesByStateRow struct {
+	ProjectID int64
+	State     string
+	Total     int64
+}
+
+// Live (not deleted) story counts per project and state, for system info.
+func (q *Queries) CountStoriesByState(ctx context.Context) ([]CountStoriesByStateRow, error) {
+	rows, err := q.db.QueryContext(ctx, countStoriesByState)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountStoriesByStateRow{}
+	for rows.Next() {
+		var i CountStoriesByStateRow
+		if err := rows.Scan(&i.ProjectID, &i.State, &i.Total); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const createActivity = `-- name: CreateActivity :exec
+INSERT INTO activity (story_id, user_id, kind, old_value, new_value, created_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+`
+
+type CreateActivityParams struct {
+	StoryID  int64
+	UserID   int64
+	Kind     string
+	OldValue string
+	NewValue string
+	Now      int64
+}
+
+func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) error {
+	_, err := q.db.ExecContext(ctx, createActivity,
+		arg.StoryID,
+		arg.UserID,
+		arg.Kind,
+		arg.OldValue,
+		arg.NewValue,
+		arg.Now,
+	)
+	return err
+}
+
 const createComment = `-- name: CreateComment :one
 INSERT INTO comments (story_id, user_id, body, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?4)
@@ -85,7 +148,7 @@ INSERT INTO stories (project_id, title, description, type, state, estimate, posi
 VALUES (?1, ?2, ?3, ?4, ?5,
         ?6, ?7, ?8, ?9,
         ?10, ?10)
-RETURNING id, project_id, title, description, type, state, estimate, position, requester_id, owner_id, created_at, updated_at, accepted_at
+RETURNING id, project_id, title, description, type, state, estimate, position, requester_id, owner_id, created_at, updated_at, accepted_at, deleted_at
 `
 
 type CreateStoryParams struct {
@@ -129,6 +192,7 @@ func (q *Queries) CreateStory(ctx context.Context, arg CreateStoryParams) (Story
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AcceptedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -170,7 +234,7 @@ func (q *Queries) GetComment(ctx context.Context, id int64) (Comment, error) {
 }
 
 const getStory = `-- name: GetStory :one
-SELECT id, project_id, title, description, type, state, estimate, position, requester_id, owner_id, created_at, updated_at, accepted_at FROM stories WHERE id = ?1
+SELECT id, project_id, title, description, type, state, estimate, position, requester_id, owner_id, created_at, updated_at, accepted_at, deleted_at FROM stories WHERE id = ?1
 `
 
 func (q *Queries) GetStory(ctx context.Context, id int64) (Story, error) {
@@ -190,13 +254,15 @@ func (q *Queries) GetStory(ctx context.Context, id int64) (Story, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AcceptedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const listAcceptedStories = `-- name: ListAcceptedStories :many
-SELECT id, project_id, title, description, type, state, estimate, position, requester_id, owner_id, created_at, updated_at, accepted_at FROM stories
+SELECT id, project_id, title, description, type, state, estimate, position, requester_id, owner_id, created_at, updated_at, accepted_at, deleted_at FROM stories
 WHERE project_id = ?1
+  AND deleted_at IS NULL
   AND accepted_at IS NOT NULL
   AND accepted_at >= ?2
   AND accepted_at < ?3
@@ -232,6 +298,7 @@ func (q *Queries) ListAcceptedStories(ctx context.Context, arg ListAcceptedStori
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AcceptedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -247,8 +314,9 @@ func (q *Queries) ListAcceptedStories(ctx context.Context, arg ListAcceptedStori
 }
 
 const listActiveStories = `-- name: ListActiveStories :many
-SELECT id, project_id, title, description, type, state, estimate, position, requester_id, owner_id, created_at, updated_at, accepted_at FROM stories
+SELECT id, project_id, title, description, type, state, estimate, position, requester_id, owner_id, created_at, updated_at, accepted_at, deleted_at FROM stories
 WHERE project_id = ?1
+  AND deleted_at IS NULL
   AND (accepted_at IS NULL OR accepted_at >= ?2)
 ORDER BY position, id
 `
@@ -283,6 +351,42 @@ func (q *Queries) ListActiveStories(ctx context.Context, arg ListActiveStoriesPa
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AcceptedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActivity = `-- name: ListActivity :many
+SELECT id, story_id, user_id, kind, old_value, new_value, created_at FROM activity WHERE story_id = ?1 ORDER BY id
+`
+
+func (q *Queries) ListActivity(ctx context.Context, storyID int64) ([]Activity, error) {
+	rows, err := q.db.QueryContext(ctx, listActivity, storyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Activity{}
+	for rows.Next() {
+		var i Activity
+		if err := rows.Scan(
+			&i.ID,
+			&i.StoryID,
+			&i.UserID,
+			&i.Kind,
+			&i.OldValue,
+			&i.NewValue,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -331,9 +435,54 @@ func (q *Queries) ListComments(ctx context.Context, storyID int64) ([]Comment, e
 	return items, nil
 }
 
+const listDeletedStories = `-- name: ListDeletedStories :many
+SELECT id, project_id, title, description, type, state, estimate, position, requester_id, owner_id, created_at, updated_at, accepted_at, deleted_at FROM stories
+WHERE project_id = ?1 AND deleted_at IS NOT NULL
+ORDER BY deleted_at DESC, id DESC
+`
+
+func (q *Queries) ListDeletedStories(ctx context.Context, projectID int64) ([]Story, error) {
+	rows, err := q.db.QueryContext(ctx, listDeletedStories, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Story{}
+	for rows.Next() {
+		var i Story
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Title,
+			&i.Description,
+			&i.Type,
+			&i.State,
+			&i.Estimate,
+			&i.Position,
+			&i.RequesterID,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AcceptedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSectionPositions = `-- name: ListSectionPositions :many
 SELECT id, position FROM stories
 WHERE project_id = ?1
+  AND deleted_at IS NULL
   AND state IN (/*SLICE:states*/?)
 ORDER BY position, id
 `
@@ -384,9 +533,22 @@ func (q *Queries) ListSectionPositions(ctx context.Context, arg ListSectionPosit
 	return items, nil
 }
 
+const purgeDeletedStories = `-- name: PurgeDeletedStories :execrows
+DELETE FROM stories WHERE deleted_at IS NOT NULL AND deleted_at < ?1
+`
+
+func (q *Queries) PurgeDeletedStories(ctx context.Context, before sql.NullInt64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeDeletedStories, before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const searchStories = `-- name: SearchStories :many
-SELECT id, project_id, title, description, type, state, estimate, position, requester_id, owner_id, created_at, updated_at, accepted_at FROM stories
+SELECT id, project_id, title, description, type, state, estimate, position, requester_id, owner_id, created_at, updated_at, accepted_at, deleted_at FROM stories
 WHERE project_id = ?1
+  AND deleted_at IS NULL
   AND LOWER(title || ' ' || description) LIKE ?2
 ORDER BY position, id
 `
@@ -422,6 +584,7 @@ func (q *Queries) SearchStories(ctx context.Context, arg SearchStoriesParams) ([
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AcceptedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -434,6 +597,21 @@ func (q *Queries) SearchStories(ctx context.Context, arg SearchStoriesParams) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const setStoryDeleted = `-- name: SetStoryDeleted :exec
+UPDATE stories SET deleted_at = ?1, updated_at = ?2 WHERE id = ?3
+`
+
+type SetStoryDeletedParams struct {
+	DeletedAt sql.NullInt64
+	Now       int64
+	ID        int64
+}
+
+func (q *Queries) SetStoryDeleted(ctx context.Context, arg SetStoryDeletedParams) error {
+	_, err := q.db.ExecContext(ctx, setStoryDeleted, arg.DeletedAt, arg.Now, arg.ID)
+	return err
 }
 
 const setStoryPosition = `-- name: SetStoryPosition :exec
@@ -463,7 +641,7 @@ SET title = ?1,
     accepted_at = ?9,
     updated_at = ?10
 WHERE id = ?11
-RETURNING id, project_id, title, description, type, state, estimate, position, requester_id, owner_id, created_at, updated_at, accepted_at
+RETURNING id, project_id, title, description, type, state, estimate, position, requester_id, owner_id, created_at, updated_at, accepted_at, deleted_at
 `
 
 type UpdateStoryParams struct {
@@ -509,6 +687,7 @@ func (q *Queries) UpdateStory(ctx context.Context, arg UpdateStoryParams) (Story
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AcceptedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }

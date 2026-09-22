@@ -9,8 +9,8 @@ export type LiveStatus = 'connecting' | 'live' | 'offline'
 
 export interface LiveOptions {
   projectId: number
-  /** Called (debounced) when other clients changed the project. */
-  onChange: () => void
+  /** Called (debounced) when other clients changed the project, with the ids of the stories mentioned. */
+  onChange: (storyIds: number[]) => void
   onStatus?: (status: LiveStatus) => void
   /** Milliseconds to coalesce events over. */
   debounce?: number
@@ -29,12 +29,16 @@ export function connectLive(opts: LiveOptions): LiveConnection {
   const debounce = opts.debounce ?? 150
   let timer: ReturnType<typeof setTimeout> | undefined
   let opened = false
+  let pending = new Set<number>()
 
-  const schedule = () => {
+  const schedule = (storyId?: number) => {
+    if (storyId) pending.add(storyId)
     clearTimeout(timer)
     timer = setTimeout(() => {
       timer = undefined
-      opts.onChange()
+      const ids = [...pending]
+      pending = new Set()
+      opts.onChange(ids)
     }, debounce)
   }
 
@@ -53,13 +57,16 @@ export function connectLive(opts: LiveOptions): LiveConnection {
   }
   const onEvent = (evt: MessageEvent) => {
     let client = ''
+    let storyId: number | undefined
     try {
-      client = JSON.parse(evt.data).client ?? ''
+      const data = JSON.parse(evt.data)
+      client = data.client ?? ''
+      storyId = data.story_id
     } catch {
       // malformed payload: still refetch, it is cheap
     }
     if (client !== '' && client === me) return
-    schedule()
+    schedule(storyId)
   }
   source.addEventListener('stories', onEvent)
   source.addEventListener('project', onEvent)

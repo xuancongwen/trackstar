@@ -8,6 +8,16 @@ import (
 	"database/sql"
 )
 
+type Activity struct {
+	ID        int64
+	StoryID   int64
+	UserID    int64
+	Kind      string
+	OldValue  string
+	NewValue  string
+	CreatedAt int64
+}
+
 type Comment struct {
 	ID        int64
 	StoryID   int64
@@ -57,6 +67,7 @@ type Story struct {
 	CreatedAt   int64
 	UpdatedAt   int64
 	AcceptedAt  sql.NullInt64
+	DeletedAt   sql.NullInt64
 }
 
 type StoryLabel struct {
@@ -72,4 +83,5 @@ type User struct {
 	IsAdmin      bool
 	CreatedAt    int64
 	UpdatedAt    int64
+	IsActive     bool
 }

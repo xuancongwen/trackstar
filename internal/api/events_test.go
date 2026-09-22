@@ -89,7 +89,7 @@ func TestEventsStreamDeliversChanges(t *testing.T) {
 		t.Fatalf("event = %s %s", name, data)
 	}
 
-	c.must(http.StatusNoContent, "DELETE", "/api/stories/1", nil, nil)
+	c.must(http.StatusOK, "DELETE", "/api/stories/1", nil, nil)
 	if name, data = nextEvent(t, r); name != "stories" || !strings.Contains(data, `"story_id":1`) {
 		t.Fatalf("delete event = %s %s", name, data)
 	}

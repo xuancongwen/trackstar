@@ -140,11 +140,18 @@ func serve() error {
 		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 		slog.SetDefault(logger)
 
+		stories := story.NewService(db, cfg.Location, nil)
+		if n, err := stories.Purge(ctx); err != nil {
+			return fmt.Errorf("purge trash: %w", err)
+		} else if n > 0 {
+			logger.Info("purged deleted stories", "count", n, "older_than_days", int(story.DeletedRetention.Hours()/24))
+		}
+
 		srv := &api.Server{
 			Auth:           auth.NewService(db, auth.Options{Secret: cfg.SessionSecret, AllowRegistration: cfg.AllowRegistration}),
-			Users:          user.NewService(db),
+			Users:          user.NewService(db, nil),
 			Projects:       project.NewService(db, nil),
-			Stories:        story.NewService(db, cfg.Location, nil),
+			Stories:        stories,
 			Velocity:       velocity.NewService(db, cfg.Location, nil),
 			DB:             db,
 			Logger:         logger,

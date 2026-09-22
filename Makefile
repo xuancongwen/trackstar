@@ -4,7 +4,7 @@ GOFLAGS := -trimpath
 SQLC    := go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
 PLATFORMS ?= linux/amd64 linux/arm64
 
-.PHONY: dev backend frontend build test lint migrate release sqlc docker clean
+.PHONY: dev backend frontend build test e2e lint migrate release sqlc docker clean
 
 ## dev: API on :3000 and Vite (hot reload) on :5173 — open http://localhost:5173
 dev: web/node_modules
@@ -33,12 +33,16 @@ test: web/node_modules
 	go test ./...
 	npm --prefix web test
 
+## e2e: headless-Chromium tests against the real binary (needs `make build`; CHROME_PATH overrides /usr/bin/chromium)
+e2e: web/node_modules
+	npm --prefix web run e2e
+
 ## lint: static checks
 lint: web/node_modules
 	go vet ./...
 	@test -z "$$(gofmt -l cmd internal db web/*.go)" || { echo "gofmt needed:"; gofmt -l cmd internal db web/*.go; exit 1; }
 	npm --prefix web run check
-	@if command -v shellcheck >/dev/null; then shellcheck scripts/*.sh; else echo "shellcheck not installed; skipping"; fi
+	@if command -v shellcheck >/dev/null; then shellcheck --severity=warning scripts/*.sh; else npx --yes shellcheck --severity=warning scripts/*.sh; fi
 
 ## migrate: apply migrations to the local development database
 migrate:

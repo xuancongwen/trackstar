@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm --prefix web ci
+
+      - name: Lint
+        run: |
+          go vet ./...
+          test -z "$(gofmt -l cmd internal db web/*.go)" || { gofmt -l cmd internal db web/*.go; exit 1; }
+          npm --prefix web run check
+          sudo apt-get install -y -qq shellcheck >/dev/null
+          # info-level notes (quoted remote commands, ls -t on our own timestamped files) are intentional
+          shellcheck --severity=warning scripts/*.sh
+
+      - name: Generated code is up to date
+        run: |
+          make sqlc
+          git diff --exit-code -- internal/database/dbgen
+
+      - name: Backend tests
+        run: go test -race ./...
+
+      - name: Frontend tests
+        run: npm --prefix web test
+
+      - name: Build
+        run: make build
+
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+
+      - name: End-to-end (headless Chromium)
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: make e2e
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image and probe /health
+        run: |
+          docker build -t tracker:ci .
+          docker run -d --name tracker -p 3000:3000 -e TRACKER_PUBLIC_URL=http://localhost:3000/ tracker:ci
+          for i in $(seq 1 30); do curl -fsS localhost:3000/health && break; sleep 1; done
+          curl -fsS localhost:3000/health | grep -q '"ok"'
+          docker logs tracker

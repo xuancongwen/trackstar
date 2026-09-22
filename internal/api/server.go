@@ -67,7 +67,10 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle(pattern, s.requireUser(http.HandlerFunc(h)))
 	}
 	authed("GET /api/me", s.handleMe)
+	authed("PATCH /api/me", s.handleUpdateMe)
 	authed("GET /api/users", s.handleListUsers)
+	authed("PATCH /api/users/{id}", s.handleUpdateUser)
+	authed("POST /api/users/{id}/password", s.handleSetUserPassword)
 	authed("GET /api/system/info", s.handleSystemInfo)
 
 	authed("GET /api/projects", s.handleListProjects)
@@ -85,6 +88,7 @@ func (s *Server) Handler() http.Handler {
 	authed("GET /api/stories/{id}", s.handleGetStory)
 	authed("PATCH /api/stories/{id}", s.handleUpdateStory)
 	authed("DELETE /api/stories/{id}", s.handleDeleteStory)
+	authed("POST /api/stories/{id}/restore", s.handleRestoreStory)
 	authed("POST /api/stories/{id}/move", s.handleMoveStory)
 	authed("POST /api/stories/{id}/comments", s.handleCreateComment)
 	authed("DELETE /api/comments/{id}", s.handleDeleteComment)

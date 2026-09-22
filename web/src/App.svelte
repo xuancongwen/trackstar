@@ -48,7 +48,7 @@
   <Login onlogin={(u) => (user = u)} />
 {:else if slug}
   {#key slug}
-    <Board {slug} {user} onlogout={logout} onunauthorized={() => (user = null)} />
+    <Board {slug} {user} onlogout={logout} onunauthorized={() => (user = null)} onuserchanged={(u) => (user = u)} />
   {/key}
 {:else}
   <Projects {user} onlogout={logout} />

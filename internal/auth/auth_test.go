@@ -9,6 +9,7 @@ import (
 
 	"tracker/internal/apperr"
 	"tracker/internal/database"
+	"tracker/internal/database/dbgen"
 )
 
 func newService(t *testing.T, allowRegistration bool) (*Service, *time.Time) {
@@ -166,5 +167,66 @@ func TestSetPassword(t *testing.T) {
 	}
 	if err := svc.SetPassword(ctx, "nobody@example.com", "new password"); apperr.KindOf(err) != apperr.KindNotFound {
 		t.Fatalf("unknown user: err = %v", err)
+	}
+}
+
+func TestDeactivatedAccountCannotLogInOrUseSession(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newService(t, true)
+	admin, err := svc.Register(ctx, RegisterInput{Email: "admin@example.com", Password: "long enough"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev, err := svc.Register(ctx, RegisterInput{Email: "dev@example.com", Password: "long enough"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := svc.Login(ctx, "dev@example.com", "long enough")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.store.UpdateUser(ctx, dbgen.UpdateUserParams{ID: dev.ID, DisplayName: "dev", IsActive: false, Now: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Authenticate(ctx, token); apperr.KindOf(err) != apperr.KindUnauthorized {
+		t.Fatalf("deactivated session: err = %v", err)
+	}
+	if _, _, err := svc.Login(ctx, "dev@example.com", "long enough"); apperr.KindOf(err) != apperr.KindForbidden {
+		t.Fatalf("deactivated login: err = %v", err)
+	}
+	if _, _, err := svc.Login(ctx, admin.Email, "long enough"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestChangePasswordKeepsCurrentSession(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newService(t, true)
+	u, err := svc.Register(ctx, RegisterInput{Email: "a@example.com", Password: "old password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep, _, err := svc.Login(ctx, "a@example.com", "old password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _, err := svc.Login(ctx, "a@example.com", "old password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ChangePassword(ctx, u.ID, "wrong", "new password", keep); apperr.KindOf(err) != apperr.KindInvalid {
+		t.Fatalf("wrong current password: err = %v", err)
+	}
+	if err := svc.ChangePassword(ctx, u.ID, "old password", "new password", keep); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Authenticate(ctx, keep); err != nil {
+		t.Fatalf("current session should survive: %v", err)
+	}
+	if _, err := svc.Authenticate(ctx, other); apperr.KindOf(err) != apperr.KindUnauthorized {
+		t.Fatalf("other session should be revoked: %v", err)
+	}
+	if _, _, err := svc.Login(ctx, "a@example.com", "new password"); err != nil {
+		t.Fatal(err)
 	}
 }

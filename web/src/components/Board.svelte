@@ -15,7 +15,10 @@
   import { connectLive, type LiveStatus } from '../lib/live'
   import { formatRange } from '../lib/format'
   import type { DropSection, Iteration, NewStory, Project, Story, StoryPatch, StoryState, User, Velocity } from '../lib/types'
+  import AccountDialog from './AccountDialog.svelte'
   import DonePanel from './DonePanel.svelte'
+  import TrashPanel from './TrashPanel.svelte'
+  import UsersDialog from './UsersDialog.svelte'
   import Panel from './Panel.svelte'
   import ProjectSettings from './ProjectSettings.svelte'
   import QuickCreate from './QuickCreate.svelte'
@@ -27,8 +30,9 @@
     user: User
     onlogout: () => void
     onunauthorized: () => void
+    onuserchanged: (user: User) => void
   }
-  let { slug, user, onlogout, onunauthorized }: Props = $props()
+  let { slug, user, onlogout, onunauthorized, onuserchanged }: Props = $props()
 
   const SECTIONS: DropSection[] = ['icebox', 'backlog', 'current']
   // Live events do the real work; this poll is only a safety net.
@@ -46,6 +50,13 @@
   let creating = $state<DropSection | null>(null)
   let showSettings = $state(false)
   let showDone = $state(false)
+  let showTrash = $state(false)
+  let trashStories = $state<Story[]>([])
+  let showAccount = $state(false)
+  let showUsers = $state(false)
+  let menuOpen = $state(false)
+  // Stories changed by others in the last few seconds get a brief highlight.
+  let recentIds = $state(new Set<number>())
   let showHelp = $state(false)
   let query = $state('')
   let matches = $state<Set<number> | null>(null)
@@ -55,6 +66,9 @@
   // A live update arrived while the user was mid-drag or a request was in flight.
   let refreshPending = $state(false)
   let toast = $state('')
+  // Undo offer after a delete.
+  let undo = $state<{ id: number; title: string } | null>(null)
+  let undoTimer: ReturnType<typeof setTimeout> | undefined
   let loadError = $state('')
   let searchInput = $state<HTMLInputElement>()
 
@@ -68,7 +82,12 @@
   })
   let accepted = $derived(acceptedThisIteration(stories).filter(visible))
   let openStory = $derived(
-    openId === null ? null : (stories.find((s) => s.id === openId) ?? doneStories.find((s) => s.id === openId) ?? null),
+    openId === null
+      ? null
+      : (stories.find((s) => s.id === openId) ??
+        doneStories.find((s) => s.id === openId) ??
+        trashStories.find((s) => s.id === openId) ??
+        null),
   )
 
   const storyRows = (list: Story[]): BacklogRow[] => list.map((story) => ({ kind: 'story', key: `story-${story.id}`, story }))
@@ -101,6 +120,7 @@
     if (!project) return
     stories = await api.stories(project.id)
     if (showDone) doneStories = await api.stories(project.id, { done: true })
+    if (showTrash) trashStories = await api.stories(project.id, { deleted: true })
   }
 
   async function loadMeta() {
@@ -118,13 +138,23 @@
 
   // Refresh now, or as soon as the board is idle: replacing the list under a
   // drag or before an optimistic move has been confirmed would fight the user.
-  function refreshWhenIdle() {
+  function refreshWhenIdle(changed: number[] = []) {
+    if (changed.length > 0) flash(changed)
     if (dragging || busyIds.size > 0) {
       refreshPending = true
       return
     }
     refreshPending = false
     refresh()
+  }
+
+  function flash(ids: number[]) {
+    recentIds = new Set([...recentIds, ...ids])
+    setTimeout(() => {
+      const next = new Set(recentIds)
+      for (const id of ids) next.delete(id)
+      recentIds = next
+    }, 2500)
   }
   $effect(() => {
     if (refreshPending && !dragging && busyIds.size === 0) refreshWhenIdle()
@@ -162,6 +192,7 @@
   function replaceStory(next: Story) {
     stories = stories.some((s) => s.id === next.id) ? stories.map((s) => (s.id === next.id ? next : s)) : [...stories, next]
     doneStories = doneStories.map((s) => (s.id === next.id ? next : s))
+    trashStories = trashStories.map((s) => (s.id === next.id ? next : s))
   }
 
   async function withBusy<T>(id: number, work: () => Promise<T>): Promise<T | undefined> {
@@ -211,15 +242,27 @@
   }
 
   async function deleteStory(id: number) {
-    const ok = await withBusy(id, async () => {
-      await api.deleteStory(id)
-      return true
-    })
-    if (!ok) return
+    const trashed = await withBusy(id, () => api.deleteStory(id))
+    if (!trashed) return
     stories = stories.filter((s) => s.id !== id)
     doneStories = doneStories.filter((s) => s.id !== id)
+    trashStories = [trashed, ...trashStories]
     openId = null
     if (selectedId === id) selectedId = null
+    undo = { id, title: trashed.title }
+    clearTimeout(undoTimer)
+    undoTimer = setTimeout(() => (undo = null), 8000)
+    if (trashed.state === 'accepted') loadMeta().catch(fail)
+  }
+
+  async function restoreStory(id: number) {
+    if (undo?.id === id) undo = null
+    const restored = await withBusy(id, () => api.restoreStory(id))
+    if (!restored) return
+    trashStories = trashStories.filter((s) => s.id !== id)
+    replaceStory(restored)
+    selectedId = id
+    if (restored.state === 'accepted') loadMeta().catch(fail)
   }
 
   function commentCountChanged(id: number, delta: number) {
@@ -249,6 +292,15 @@
   async function toggleDone() {
     showDone = !showDone
     if (showDone && project) doneStories = await api.stories(project.id, { done: true }).catch((err) => (fail(err), []))
+  }
+
+  async function toggleTrash() {
+    showTrash = !showTrash
+    if (showTrash && project) trashStories = await api.stories(project.id, { deleted: true }).catch((err) => (fail(err), []))
+  }
+
+  async function reloadUsers() {
+    userList = await api.users().catch((err) => (fail(err), userList))
   }
 
   // --- keyboard ---------------------------------------------------------------
@@ -286,6 +338,9 @@
 
   function closeTopmost(): boolean {
     if (creating) creating = null
+    else if (menuOpen) menuOpen = false
+    else if (showAccount) showAccount = false
+    else if (showUsers) showUsers = false
     else if (showSettings) showSettings = false
     else if (showHelp) showHelp = false
     else if (openId !== null) openId = null
@@ -305,7 +360,7 @@
       if (closeTopmost()) event.preventDefault()
       return
     }
-    if (typing || event.ctrlKey || event.metaKey || event.altKey || creating || showSettings) return
+    if (typing || event.ctrlKey || event.metaKey || event.altKey || creating || showSettings || showAccount || showUsers) return
 
     const selected = stories.find((s) => s.id === selectedId)
     switch (event.key) {
@@ -390,16 +445,34 @@
             : 'Connecting…'}>●</span
       >
       <button class:on={showDone} onclick={toggleDone}>Done</button>
+      <button class:on={showTrash} onclick={toggleTrash} title="Deleted stories">Trash</button>
       <button onclick={() => (creating = 'icebox')} title="New story (c)">+ Story</button>
       <button onclick={() => (showSettings = true)}>Settings</button>
       <button onclick={() => (showHelp = !showHelp)} title="Keyboard shortcuts (?)">?</button>
-      <span class="me">{user.display_name}</span>
-      <button onclick={onlogout}>Sign out</button>
+      <div class="menu">
+        <button class:on={menuOpen} onclick={() => (menuOpen = !menuOpen)} aria-haspopup="menu" aria-expanded={menuOpen}>
+          {user.display_name} ▾
+        </button>
+        {#if menuOpen}
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <div class="menu-backdrop" onclick={() => (menuOpen = false)}></div>
+          <div class="menu-items" role="menu">
+            <button role="menuitem" onclick={() => ((showAccount = true), (menuOpen = false))}>Account…</button>
+            {#if user.is_admin}
+              <button role="menuitem" onclick={() => ((showUsers = true), (menuOpen = false))}>Users…</button>
+            {/if}
+            <button role="menuitem" onclick={onlogout}>Sign out</button>
+          </div>
+        {/if}
+      </div>
     </header>
 
-    <main class="panels" class:with-done={showDone}>
+    <main class="panels" style:grid-template-columns={`repeat(${3 + Number(showDone) + Number(showTrash)}, minmax(0, 1fr))`}>
       {#if showDone}
         <DonePanel {iterations} stories={doneStories} {users} {selectedId} onopen={openStoryRow} />
+      {/if}
+      {#if showTrash}
+        <TrashPanel stories={trashStories} onrestore={(s) => restoreStory(s.id)} onopen={openStoryRow} />
       {/if}
       {#each SECTIONS as section (section)}
         <Panel
@@ -408,6 +481,7 @@
           {users}
           {selectedId}
           {busyIds}
+          {recentIds}
           summary={summaries[section]}
           dragDisabled={matches !== null}
           {dragging}
@@ -443,6 +517,7 @@
       me={user}
       onpatch={patchStory}
       ondelete={deleteStory}
+      onrestore={restoreStory}
       oncommented={commentCountChanged}
       onclose={() => (openId = null)}
     />
@@ -461,6 +536,12 @@
       }}
     />
   {/if}
+  {#if showAccount}
+    <AccountDialog {user} onsaved={(u) => (onuserchanged(u), reloadUsers())} onclose={() => (showAccount = false)} />
+  {/if}
+  {#if showUsers}
+    <UsersDialog me={user} users={userList} onchanged={(list) => (userList = list)} onclose={() => (showUsers = false)} />
+  {/if}
   {#if showHelp}
     <div class="help" role="note">
       <kbd>c</kbd> new story · <kbd>j</kbd>/<kbd>k</kbd> move selection · <kbd>h</kbd>/<kbd>l</kbd> switch panel ·
@@ -468,6 +549,11 @@
     </div>
   {/if}
   {#if toast}<div class="toast" role="alert">{toast}</div>{/if}
+  {#if undo}
+    <div class="undo" role="status">
+      Deleted “{undo.title}”. <button class="link" onclick={() => restoreStory(undo!.id)}>Undo</button>
+    </div>
+  {/if}
 {:else}
   <p class="load-error muted">Loading…</p>
 {/if}
@@ -542,14 +628,10 @@
     gap: 8px;
     padding: 8px;
   }
-  .panels.with-done {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
   @media (max-width: 900px) {
-    .panels,
-    .panels.with-done {
+    .panels {
       grid-auto-flow: column;
-      grid-template-columns: none;
+      grid-template-columns: none !important;
       grid-auto-columns: minmax(300px, 88vw);
       overflow-x: auto;
     }
@@ -594,6 +676,54 @@
     background: var(--danger);
     color: #fff;
     bottom: 52px;
+  }
+  .undo {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 14px;
+    padding: 7px 14px;
+    border-radius: 6px;
+    background: var(--panel-head);
+    color: var(--panel-head-text);
+    box-shadow: var(--shadow);
+    z-index: 40;
+  }
+  .undo .link {
+    color: var(--accent);
+    font-weight: 600;
+    margin-left: 6px;
+  }
+  .menu {
+    position: relative;
+  }
+  .menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 25;
+  }
+  .menu-items {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 26;
+    display: grid;
+    min-width: 150px;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+    padding: 4px;
+  }
+  .menu-items button {
+    text-align: left;
+    border: 0;
+    color: var(--text);
+    padding: 6px 10px;
+  }
+  .menu-items button:hover {
+    background: var(--row-hover);
   }
   .load-error {
     padding: 40px;

@@ -37,7 +37,7 @@ func newServer(t *testing.T, allowRegistration bool) (*Server, *httptest.Server)
 	publicURL, _ := url.Parse("https://track.example.com/")
 	srv := &Server{
 		Auth:           auth.NewService(db, auth.Options{Secret: []byte("0123456789abcdef0123456789abcdef"), AllowRegistration: allowRegistration, BcryptCost: bcrypt.MinCost}),
-		Users:          user.NewService(db),
+		Users:          user.NewService(db, nil),
 		Projects:       project.NewService(db, nil),
 		Stories:        story.NewService(db, time.UTC, nil),
 		Velocity:       velocity.NewService(db, time.UTC, nil),
@@ -183,8 +183,22 @@ func TestEndToEndWorkflow(t *testing.T) {
 		t.Fatalf("iterations = %+v", its)
 	}
 
-	c.must(http.StatusNoContent, "DELETE", "/api/stories/2", nil, nil)
-	c.must(http.StatusNotFound, "GET", "/api/stories/2", nil, nil)
+	c.must(http.StatusOK, "DELETE", "/api/stories/2", nil, nil)
+	c.must(http.StatusOK, "GET", "/api/projects/1/stories", nil, &list)
+	if len(list) != 1 {
+		t.Fatalf("stories after delete = %d, want 1", len(list))
+	}
+	c.must(http.StatusOK, "GET", "/api/projects/1/stories?section=deleted", nil, &list)
+	if len(list) != 1 || list[0].DeletedAt == nil {
+		t.Fatalf("trash = %+v", list)
+	}
+	c.must(http.StatusOK, "POST", "/api/stories/2/restore", nil, &b)
+	if b.DeletedAt != nil || b.State != story.StateBacklog {
+		t.Fatalf("restored = %+v", b)
+	}
+	c.must(http.StatusUnprocessableEntity, "POST", "/api/stories/2/restore", nil, nil)
+	c.must(http.StatusOK, "DELETE", "/api/stories/2", nil, nil)
+	c.must(http.StatusNotFound, "DELETE", "/api/stories/2", nil, nil)
 	c.must(http.StatusNotFound, "GET", "/api/stories/abc", nil, nil)
 	c.must(http.StatusNotFound, "GET", "/api/nope", nil, nil)
 

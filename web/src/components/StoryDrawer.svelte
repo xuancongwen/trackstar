@@ -2,7 +2,7 @@
   import { api } from '../lib/api'
   import { ESTIMATES, nextActions } from '../lib/board'
   import { formatDayTime } from '../lib/format'
-  import type { Comment, Story, StoryPatch, StoryType, User } from '../lib/types'
+  import type { Activity, Comment, Story, StoryPatch, StoryType, User } from '../lib/types'
 
   interface Props {
     story: Story
@@ -10,10 +10,11 @@
     me: User
     onpatch: (id: number, patch: StoryPatch) => Promise<boolean>
     ondelete: (id: number) => Promise<void>
+    onrestore: (id: number) => Promise<void>
     oncommented: (id: number, delta: number) => void
     onclose: () => void
   }
-  let { story, users, me, onpatch, ondelete, oncommented, onclose }: Props = $props()
+  let { story, users, me, onpatch, ondelete, onrestore, oncommented, onclose }: Props = $props()
 
   // Text fields are edited locally and saved on blur; they re-sync whenever
   // the story changes underneath (server response, background refresh).
@@ -27,24 +28,71 @@
   })
 
   let comments = $state<Comment[]>([])
+  let activity = $state<Activity[]>([])
   let commentBody = $state('')
   let confirmDelete = $state(false)
   let error = $state('')
 
+  // Re-read comments and history whenever the story changes (own edits,
+  // live updates from others) — the detail endpoint is cheap.
   $effect(() => {
     const id = story.id
-    comments = []
-    confirmDelete = false
+    void story.updated_at
     api
       .story(id)
       .then((d) => {
-        if (d.id === story.id) comments = d.comments
+        if (d.id !== story.id) return
+        comments = d.comments
+        activity = d.activity
       })
       .catch((err) => (error = err.message))
   })
+  $effect(() => {
+    void story.id
+    confirmDelete = false
+  })
 
-  let locked = $derived(story.state === 'accepted')
-  let userList = $derived([...users.values()])
+  let trashed = $derived(story.deleted_at != null)
+  let locked = $derived(story.state === 'accepted' || trashed)
+  let userList = $derived([...users.values()].filter((u) => u.is_active || u.id === story.owner_id || u.id === story.requester_id))
+
+  // Comments and history interleaved by time.
+  type Entry = { kind: 'comment'; at: string; comment: Comment } | { kind: 'activity'; at: string; activity: Activity }
+  let timeline = $derived(
+    [
+      ...comments.map((c): Entry => ({ kind: 'comment', at: c.created_at, comment: c })),
+      ...activity.map((a): Entry => ({ kind: 'activity', at: a.created_at, activity: a })),
+    ].sort((a, b) => a.at.localeCompare(b.at)),
+  )
+
+  const name = (id: string | number | null | undefined) =>
+    id === '' || id == null ? 'nobody' : (users.get(Number(id))?.display_name ?? `user ${id}`)
+  function describe(a: Activity): string {
+    switch (a.kind) {
+      case 'created':
+        return `created the story in ${a.new_value}`
+      case 'title':
+        return `renamed “${a.old_value}” to “${a.new_value}”`
+      case 'type':
+        return `changed type ${a.old_value} → ${a.new_value}`
+      case 'estimate':
+        return a.new_value === '' ? 'removed the estimate' : `estimated ${a.new_value} point${a.new_value === '1' ? '' : 's'}${a.old_value ? ` (was ${a.old_value})` : ''}`
+      case 'owner':
+        return `assigned ${name(a.new_value)}${a.old_value ? ` (was ${name(a.old_value)})` : ''}`
+      case 'state':
+        return `${a.old_value} → ${a.new_value}`
+      case 'moved':
+        return `moved from ${a.old_value} to ${a.new_value}`
+      case 'deleted':
+        return 'deleted the story'
+      case 'restored':
+        return 'restored the story'
+      case 'reopened':
+        return 'reopened the accepted story'
+      default:
+        return `${a.kind} ${a.old_value} → ${a.new_value}`
+    }
+  }
 
   function saveTitle() {
     if (title.trim() && title.trim() !== story.title) onpatch(story.id, { title })
@@ -86,13 +134,20 @@
 
 <aside class="drawer" aria-label="Story details">
   <header>
-    <span class="muted">#{story.id} · {story.state}</span>
+    <span class="muted">#{story.id} · {trashed ? 'deleted' : story.state}</span>
     <span class="spacer"></span>
-    {#each nextActions(story) as action (action.state)}
-      <button class="primary" onclick={() => onpatch(story.id, { state: action.state })}>{action.label}</button>
-    {/each}
-    {#if story.state === 'started'}
-      <button onclick={() => onpatch(story.id, { state: 'unstarted' })} title="Back to unstarted">Unstart</button>
+    {#if trashed}
+      <button class="primary" onclick={() => onrestore(story.id)}>Restore</button>
+    {:else}
+      {#each nextActions(story) as action (action.state)}
+        <button class="primary" onclick={() => onpatch(story.id, { state: action.state })}>{action.label}</button>
+      {/each}
+      {#if story.state === 'started'}
+        <button onclick={() => onpatch(story.id, { state: 'unstarted' })} title="Back to unstarted">Unstart</button>
+      {/if}
+      {#if story.state === 'accepted' && me.is_admin}
+        <button onclick={() => onpatch(story.id, { state: 'delivered' })} title="Admin: undo acceptance (affects velocity)">Reopen</button>
+      {/if}
     {/if}
     <button onclick={onclose} title="Close (Esc)" aria-label="Close">✕</button>
   </header>
@@ -101,6 +156,7 @@
     <input
       class="title"
       aria-label="Title"
+      disabled={trashed}
       bind:value={title}
       onblur={saveTitle}
       onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
@@ -123,6 +179,7 @@
         <span>Owner</span>
         <select
           value={story.owner_id ?? ''}
+          disabled={trashed}
           onchange={(e) => onpatch(story.id, { owner_id: e.currentTarget.value ? Number(e.currentTarget.value) : null })}
         >
           <option value="">Unassigned</option>
@@ -133,6 +190,7 @@
         <span>Requester</span>
         <select
           value={story.requester_id}
+          disabled={trashed}
           onchange={(e) => onpatch(story.id, { requester_id: Number(e.currentTarget.value) })}
         >
           {#each userList as u (u.id)}<option value={u.id}>{u.display_name}</option>{/each}
@@ -155,13 +213,14 @@
 
     <label class="field">
       <span>Description</span>
-      <textarea bind:value={description} onblur={saveDescription} rows="7" placeholder="Add a description…"></textarea>
+      <textarea bind:value={description} onblur={saveDescription} rows="7" placeholder="Add a description…" disabled={trashed}></textarea>
     </label>
 
     <label class="field">
       <span>Labels</span>
       <input
         bind:value={labels}
+        disabled={trashed}
         onblur={saveLabels}
         onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
         placeholder="comma, separated"
@@ -170,18 +229,31 @@
 
     <section>
       <h3>Activity</h3>
-      {#each comments as comment (comment.id)}
-        <article>
-          <div class="comment-head">
-            <strong>{users.get(comment.user_id)?.display_name ?? 'Unknown'}</strong>
-            <span class="muted">{formatDayTime(comment.created_at)}</span>
-            {#if comment.user_id === me.id}
-              <button class="link" onclick={() => removeComment(comment)}>delete</button>
-            {/if}
-          </div>
-          <p>{comment.body}</p>
-        </article>
-      {/each}
+      <ol class="timeline">
+        {#each timeline as entry (entry.kind + (entry.kind === 'comment' ? entry.comment.id : entry.activity.id))}
+          {#if entry.kind === 'comment'}
+            <li>
+              <article>
+                <div class="comment-head">
+                  <strong>{name(entry.comment.user_id)}</strong>
+                  <span class="muted">{formatDayTime(entry.comment.created_at)}</span>
+                  {#if entry.comment.user_id === me.id && !trashed}
+                    <button class="link" onclick={() => removeComment(entry.comment)}>delete</button>
+                  {/if}
+                </div>
+                <p>{entry.comment.body}</p>
+              </article>
+            </li>
+          {:else}
+            <li class="event muted">
+              <strong>{name(entry.activity.user_id)}</strong>
+              {describe(entry.activity)}
+              <span class="when">{formatDayTime(entry.activity.created_at)}</span>
+            </li>
+          {/if}
+        {/each}
+      </ol>
+      {#if !trashed}
       <form onsubmit={addComment}>
         <textarea
           bind:value={commentBody}
@@ -193,6 +265,7 @@
         ></textarea>
         <button disabled={!commentBody.trim()}>Post comment</button>
       </form>
+      {/if}
     </section>
 
     {#if error}<p class="error" role="alert">{error}</p>{/if}
@@ -202,8 +275,10 @@
         Requested {formatDayTime(story.created_at)}
         {#if story.accepted_at}· accepted {formatDayTime(story.accepted_at)}{/if}
       </span>
-      {#if confirmDelete}
-        <button class="danger" onclick={() => ondelete(story.id)}>Really delete</button>
+      {#if trashed}
+        <span class="muted">In the trash; purged 30 days after deletion.</span>
+      {:else if confirmDelete}
+        <button class="danger" onclick={() => ondelete(story.id)}>Move to trash</button>
         <button onclick={() => (confirmDelete = false)}>Keep</button>
       {:else}
         <button class="danger" onclick={() => (confirmDelete = true)}>Delete story</button>
@@ -267,9 +342,24 @@
     letter-spacing: 0.04em;
     color: var(--muted);
   }
+  .timeline {
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+    display: grid;
+    gap: 4px;
+  }
+  .event {
+    font-size: 11px;
+    padding: 1px 8px;
+  }
+  .event .when {
+    margin-left: 6px;
+    opacity: 0.7;
+  }
   article {
     padding: 6px 8px;
-    margin-bottom: 6px;
+    margin-bottom: 2px;
     background: var(--row);
     border: 1px solid var(--border);
     border-radius: 4px;

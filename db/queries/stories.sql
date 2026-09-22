@@ -35,12 +35,14 @@ DELETE FROM stories WHERE id = sqlc.arg(id);
 -- name: ListActiveStories :many
 SELECT * FROM stories
 WHERE project_id = sqlc.arg(project_id)
+  AND deleted_at IS NULL
   AND (accepted_at IS NULL OR accepted_at >= sqlc.arg(accepted_since))
 ORDER BY position, id;
 
 -- name: ListAcceptedStories :many
 SELECT * FROM stories
 WHERE project_id = sqlc.arg(project_id)
+  AND deleted_at IS NULL
   AND accepted_at IS NOT NULL
   AND accepted_at >= sqlc.arg(accepted_from)
   AND accepted_at < sqlc.arg(accepted_before)
@@ -51,6 +53,7 @@ ORDER BY accepted_at, id;
 -- name: ListSectionPositions :many
 SELECT id, position FROM stories
 WHERE project_id = sqlc.arg(project_id)
+  AND deleted_at IS NULL
   AND state IN (sqlc.slice(states))
 ORDER BY position, id;
 
@@ -60,6 +63,7 @@ ORDER BY position, id;
 -- name: SearchStories :many
 SELECT * FROM stories
 WHERE project_id = sqlc.arg(project_id)
+  AND deleted_at IS NULL
   AND LOWER(title || ' ' || description) LIKE sqlc.arg(pattern)
 ORDER BY position, id;
 
@@ -83,3 +87,28 @@ FROM comments
 JOIN stories ON stories.id = comments.story_id
 WHERE stories.project_id = sqlc.arg(project_id)
 GROUP BY comments.story_id;
+
+-- name: ListDeletedStories :many
+SELECT * FROM stories
+WHERE project_id = sqlc.arg(project_id) AND deleted_at IS NOT NULL
+ORDER BY deleted_at DESC, id DESC;
+
+-- name: SetStoryDeleted :exec
+UPDATE stories SET deleted_at = sqlc.narg(deleted_at), updated_at = sqlc.arg(now) WHERE id = sqlc.arg(id);
+
+-- name: PurgeDeletedStories :execrows
+DELETE FROM stories WHERE deleted_at IS NOT NULL AND deleted_at < sqlc.arg(before);
+
+-- Live (not deleted) story counts per project and state, for system info.
+-- name: CountStoriesByState :many
+SELECT project_id, state, COUNT(*) AS total
+FROM stories
+WHERE deleted_at IS NULL
+GROUP BY project_id, state;
+
+-- name: CreateActivity :exec
+INSERT INTO activity (story_id, user_id, kind, old_value, new_value, created_at)
+VALUES (sqlc.arg(story_id), sqlc.arg(user_id), sqlc.arg(kind), sqlc.arg(old_value), sqlc.arg(new_value), sqlc.arg(now));
+
+-- name: ListActivity :many
+SELECT * FROM activity WHERE story_id = sqlc.arg(story_id) ORDER BY id;

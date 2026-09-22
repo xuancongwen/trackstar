@@ -2,6 +2,8 @@ package story_test
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,7 +57,7 @@ func (f *fixture) setState(t *testing.T, id int64, states ...story.State) story.
 	var s story.Story
 	for _, st := range states {
 		var err error
-		if s, err = f.svc.Update(f.ctx, id, f.user, story.UpdateInput{State: &st}); err != nil {
+		if s, err = f.svc.Update(f.ctx, id, story.Actor{ID: f.user}, story.UpdateInput{State: &st}); err != nil {
 			t.Fatalf("transition to %s: %v", st, err)
 		}
 	}
@@ -180,19 +182,30 @@ func TestInvalidTransitions(t *testing.T) {
 	s := f.create(t, "Feature", story.SectionBacklog, 2)
 
 	for _, to := range []story.State{story.StateFinished, story.StateDelivered, story.StateAccepted, story.StateRejected, "bogus"} {
-		if _, err := f.svc.Update(f.ctx, s.ID, f.user, story.UpdateInput{State: &to}); apperr.KindOf(err) != apperr.KindInvalid {
+		if _, err := f.svc.Update(f.ctx, s.ID, story.Actor{ID: f.user}, story.UpdateInput{State: &to}); apperr.KindOf(err) != apperr.KindInvalid {
 			t.Errorf("backlog → %s: err = %v, want invalid", to, err)
 		}
 	}
 
 	f.setState(t, s.ID, story.StateStarted, story.StateFinished, story.StateDelivered, story.StateAccepted)
 	for _, to := range []story.State{story.StateStarted, story.StateRejected, story.StateBacklog} {
-		if _, err := f.svc.Update(f.ctx, s.ID, f.user, story.UpdateInput{State: &to}); apperr.KindOf(err) != apperr.KindInvalid {
+		if _, err := f.svc.Update(f.ctx, s.ID, story.Actor{ID: f.user}, story.UpdateInput{State: &to}); apperr.KindOf(err) != apperr.KindInvalid {
 			t.Errorf("accepted → %s: err = %v, want invalid", to, err)
 		}
 	}
-	if _, err := f.svc.Update(f.ctx, s.ID, f.user, story.UpdateInput{Estimate: story.Some(int64(8))}); apperr.KindOf(err) != apperr.KindInvalid {
+	if _, err := f.svc.Update(f.ctx, s.ID, story.Actor{ID: f.user}, story.UpdateInput{Estimate: story.Some(int64(8))}); apperr.KindOf(err) != apperr.KindInvalid {
 		t.Errorf("re-estimating an accepted story: err = %v, want invalid", err)
+	}
+	delivered := story.StateDelivered
+	if _, err := f.svc.Update(f.ctx, s.ID, story.Actor{ID: f.user}, story.UpdateInput{State: &delivered}); apperr.KindOf(err) != apperr.KindForbidden {
+		t.Errorf("non-admin reopen: err = %v, want forbidden", err)
+	}
+	reopened, err := f.svc.Update(f.ctx, s.ID, story.Actor{ID: f.user, IsAdmin: true}, story.UpdateInput{State: &delivered})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.State != story.StateDelivered || reopened.AcceptedAt != nil || reopened.Section != story.SectionCurrent {
+		t.Fatalf("reopened = %+v", reopened)
 	}
 }
 
@@ -204,17 +217,17 @@ func TestEstimateRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.Update(f.ctx, feature.ID, f.user, story.UpdateInput{State: &started}); apperr.KindOf(err) != apperr.KindInvalid {
+	if _, err := f.svc.Update(f.ctx, feature.ID, story.Actor{ID: f.user}, story.UpdateInput{State: &started}); apperr.KindOf(err) != apperr.KindInvalid {
 		t.Fatalf("starting an unestimated feature: err = %v, want invalid", err)
 	}
 	// Estimating and starting in one request is fine.
-	if _, err := f.svc.Update(f.ctx, feature.ID, f.user, story.UpdateInput{State: &started, Estimate: story.Some(int64(5))}); err != nil {
+	if _, err := f.svc.Update(f.ctx, feature.ID, story.Actor{ID: f.user}, story.UpdateInput{State: &started, Estimate: story.Some(int64(5))}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.Update(f.ctx, feature.ID, f.user, story.UpdateInput{Estimate: story.Null[int64]()}); apperr.KindOf(err) != apperr.KindInvalid {
+	if _, err := f.svc.Update(f.ctx, feature.ID, story.Actor{ID: f.user}, story.UpdateInput{Estimate: story.Null[int64]()}); apperr.KindOf(err) != apperr.KindInvalid {
 		t.Fatalf("clearing the estimate of a started feature: err = %v, want invalid", err)
 	}
-	if _, err := f.svc.Update(f.ctx, feature.ID, f.user, story.UpdateInput{Estimate: story.Some(int64(4))}); apperr.KindOf(err) != apperr.KindInvalid {
+	if _, err := f.svc.Update(f.ctx, feature.ID, story.Actor{ID: f.user}, story.UpdateInput{Estimate: story.Some(int64(4))}); apperr.KindOf(err) != apperr.KindInvalid {
 		t.Fatalf("estimate 4: err = %v, want invalid", err)
 	}
 
@@ -222,7 +235,7 @@ func TestEstimateRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.Update(f.ctx, bug.ID, f.user, story.UpdateInput{State: &started}); err != nil {
+	if _, err := f.svc.Update(f.ctx, bug.ID, story.Actor{ID: f.user}, story.UpdateInput{State: &started}); err != nil {
 		t.Fatalf("bugs may be started unestimated: %v", err)
 	}
 }
@@ -237,7 +250,7 @@ func TestReorderWithinSection(t *testing.T) {
 	move := func(id int64, in story.MoveInput) {
 		t.Helper()
 		in.Section = story.SectionBacklog
-		if _, err := f.svc.Move(f.ctx, id, in); err != nil {
+		if _, err := f.svc.Move(f.ctx, id, f.user, in); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -270,7 +283,7 @@ func TestMoveBetweenSections(t *testing.T) {
 	b1 := f.create(t, "B1", story.SectionBacklog, 1)
 	f.create(t, "B2", story.SectionBacklog, 1)
 
-	res, err := f.svc.Move(f.ctx, ice.ID, story.MoveInput{Section: story.SectionBacklog, PrevID: &b1.ID})
+	res, err := f.svc.Move(f.ctx, ice.ID, f.user, story.MoveInput{Section: story.SectionBacklog, PrevID: &b1.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +293,7 @@ func TestMoveBetweenSections(t *testing.T) {
 	assertOrder(t, f.titles(t, story.SectionBacklog), "B1", "Ice", "B2")
 	assertOrder(t, f.titles(t, story.SectionIcebox))
 
-	res, err = f.svc.Move(f.ctx, ice.ID, story.MoveInput{Section: story.SectionCurrent})
+	res, err = f.svc.Move(f.ctx, ice.ID, f.user, story.MoveInput{Section: story.SectionCurrent})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +304,7 @@ func TestMoveBetweenSections(t *testing.T) {
 	// Reordering inside current must not reset progress.
 	f.setState(t, ice.ID, story.StateStarted)
 	other := f.create(t, "Other", story.SectionCurrent, 1)
-	res, err = f.svc.Move(f.ctx, ice.ID, story.MoveInput{Section: story.SectionCurrent, PrevID: &other.ID})
+	res, err = f.svc.Move(f.ctx, ice.ID, f.user, story.MoveInput{Section: story.SectionCurrent, PrevID: &other.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +332,7 @@ func TestMoveRejectsInvalidRequests(t *testing.T) {
 		"started leaves current":  {wip.ID, story.MoveInput{Section: story.SectionBacklog}},
 	}
 	for name, c := range cases {
-		if _, err := f.svc.Move(f.ctx, c.id, c.in); apperr.KindOf(err) != apperr.KindInvalid {
+		if _, err := f.svc.Move(f.ctx, c.id, f.user, c.in); apperr.KindOf(err) != apperr.KindInvalid {
 			t.Errorf("%s: err = %v, want invalid", name, err)
 		}
 	}
@@ -328,7 +341,7 @@ func TestMoveRejectsInvalidRequests(t *testing.T) {
 	assertOrder(t, f.titles(t, story.SectionBacklog), "Back")
 
 	f.setState(t, wip.ID, story.StateFinished, story.StateDelivered, story.StateAccepted)
-	if _, err := f.svc.Move(f.ctx, wip.ID, story.MoveInput{Section: story.SectionCurrent}); apperr.KindOf(err) != apperr.KindInvalid {
+	if _, err := f.svc.Move(f.ctx, wip.ID, f.user, story.MoveInput{Section: story.SectionCurrent}); apperr.KindOf(err) != apperr.KindInvalid {
 		t.Errorf("moving an accepted story: err = %v, want invalid", err)
 	}
 }
@@ -348,7 +361,7 @@ func TestNormalizationWhenGapIsExhausted(t *testing.T) {
 		if i%2 == 1 {
 			id, want = y.ID, []string{"A", "Y", "X", "B"}
 		}
-		res, err := f.svc.Move(f.ctx, id, story.MoveInput{Section: story.SectionBacklog, PrevID: &a.ID})
+		res, err := f.svc.Move(f.ctx, id, f.user, story.MoveInput{Section: story.SectionBacklog, PrevID: &a.ID})
 		if err != nil {
 			t.Fatalf("move %d: %v", i, err)
 		}
@@ -392,7 +405,7 @@ func TestUpdateFieldsLabelsAndSearch(t *testing.T) {
 
 	title, desc, typ := "Add SSO support", "Use the OIDC discovery document", story.TypeChore
 	labels := []string{"auth"}
-	got, err := f.svc.Update(f.ctx, s.ID, f.user, story.UpdateInput{
+	got, err := f.svc.Update(f.ctx, s.ID, story.Actor{ID: f.user}, story.UpdateInput{
 		Title: &title, Description: &desc, Type: &typ, OwnerID: story.Some(other), Labels: &labels,
 		Estimate: story.Null[int64](),
 	})
@@ -406,13 +419,13 @@ func TestUpdateFieldsLabelsAndSearch(t *testing.T) {
 		t.Fatal("field edits must not touch ordering or state")
 	}
 
-	if _, err := f.svc.Update(f.ctx, s.ID, f.user, story.UpdateInput{OwnerID: story.Some(int64(999))}); apperr.KindOf(err) != apperr.KindInvalid {
+	if _, err := f.svc.Update(f.ctx, s.ID, story.Actor{ID: f.user}, story.UpdateInput{OwnerID: story.Some(int64(999))}); apperr.KindOf(err) != apperr.KindInvalid {
 		t.Errorf("unknown owner: err = %v, want invalid", err)
 	}
 
 	// Removing the last use of a label removes the label.
 	empty := []string{}
-	if _, err := f.svc.Update(f.ctx, s.ID, f.user, story.UpdateInput{Labels: &empty}); err != nil {
+	if _, err := f.svc.Update(f.ctx, s.ID, story.Actor{ID: f.user}, story.UpdateInput{Labels: &empty}); err != nil {
 		t.Fatal(err)
 	}
 	if names, _ := f.svc.Labels(f.ctx, f.project.ID); len(names) != 0 {
@@ -461,13 +474,121 @@ func TestCommentsAndDelete(t *testing.T) {
 		t.Fatalf("comment_count in list = %d", list[0].CommentCount)
 	}
 
-	if err := f.svc.Delete(f.ctx, s.ID); err != nil {
+	if _, err := f.svc.Delete(f.ctx, s.ID, f.user); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.Get(f.ctx, s.ID); apperr.KindOf(err) != apperr.KindNotFound {
-		t.Errorf("get after delete: err = %v", err)
-	}
-	if err := f.svc.Delete(f.ctx, s.ID); apperr.KindOf(err) != apperr.KindNotFound {
+	if _, err := f.svc.Delete(f.ctx, s.ID, f.user); apperr.KindOf(err) != apperr.KindNotFound {
 		t.Errorf("double delete: err = %v", err)
+	}
+}
+
+func TestSoftDeleteRestoreAndPurge(t *testing.T) {
+	f := setup(t)
+	a := f.create(t, "A", story.SectionBacklog, 1)
+	b := f.create(t, "B", story.SectionBacklog, 1)
+	labels := []string{"only-on-a"}
+	if _, err := f.svc.Update(f.ctx, a.ID, story.Actor{ID: f.user}, story.UpdateInput{Labels: &labels}); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := f.svc.Delete(f.ctx, a.ID, f.user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted.DeletedAt == nil {
+		t.Fatal("deleted_at not set")
+	}
+	assertOrder(t, f.titles(t, story.SectionBacklog), "B")
+	trash, _ := f.svc.List(f.ctx, f.project.ID, story.ListOptions{Deleted: true})
+	if len(trash) != 1 || trash[0].ID != a.ID {
+		t.Fatalf("trash = %+v", trash)
+	}
+	// Trashed stories are inert.
+	title := "x"
+	if _, err := f.svc.Update(f.ctx, a.ID, story.Actor{ID: f.user}, story.UpdateInput{Title: &title}); apperr.KindOf(err) != apperr.KindInvalid {
+		t.Errorf("update trashed: err = %v", err)
+	}
+	if _, err := f.svc.Move(f.ctx, a.ID, f.user, story.MoveInput{Section: story.SectionIcebox}); apperr.KindOf(err) != apperr.KindInvalid {
+		t.Errorf("move trashed: err = %v", err)
+	}
+	if _, err := f.svc.AddComment(f.ctx, a.ID, f.user, "hi"); apperr.KindOf(err) != apperr.KindNotFound {
+		t.Errorf("comment on trashed: err = %v", err)
+	}
+	if _, err := f.svc.Move(f.ctx, b.ID, f.user, story.MoveInput{Section: story.SectionBacklog, PrevID: &a.ID}); apperr.KindOf(err) != apperr.KindInvalid {
+		t.Errorf("trashed story as neighbour: err = %v", err)
+	}
+
+	// Restore lands at the bottom of its section, labels intact.
+	restored, err := f.svc.Restore(f.ctx, a.ID, f.user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.DeletedAt != nil || len(restored.Labels) != 1 {
+		t.Fatalf("restored = %+v", restored)
+	}
+	assertOrder(t, f.titles(t, story.SectionBacklog), "B", "A")
+	if _, err := f.svc.Restore(f.ctx, a.ID, f.user); apperr.KindOf(err) != apperr.KindInvalid {
+		t.Errorf("restore live story: err = %v", err)
+	}
+
+	// Purge removes only stories past the retention window.
+	if _, err := f.svc.Delete(f.ctx, a.ID, f.user); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.Advance(story.DeletedRetention - time.Hour)
+	if _, err := f.svc.Delete(f.ctx, b.ID, f.user); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.Advance(2 * time.Hour)
+	n, err := f.svc.Purge(f.ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("purge = %d, %v; want 1", n, err)
+	}
+	if _, err := f.svc.Get(f.ctx, a.ID); apperr.KindOf(err) != apperr.KindNotFound {
+		t.Errorf("purged story still readable: %v", err)
+	}
+	if names, _ := f.svc.Labels(f.ctx, f.project.ID); len(names) != 0 {
+		t.Errorf("labels after purge = %v", names)
+	}
+	trash, _ = f.svc.List(f.ctx, f.project.ID, story.ListOptions{Deleted: true})
+	if len(trash) != 1 || trash[0].ID != b.ID {
+		t.Fatalf("trash after purge = %+v", trash)
+	}
+}
+
+func TestActivityIsRecorded(t *testing.T) {
+	f := setup(t)
+	other := testutil.CreateUser(t, f.store, "kim@example.com")
+	s := f.create(t, "Story", story.SectionBacklog, 3)
+	title := "Renamed"
+	if _, err := f.svc.Update(f.ctx, s.ID, story.Actor{ID: f.user}, story.UpdateInput{Title: &title, Estimate: story.Some(int64(5)), OwnerID: story.Some(other)}); err != nil {
+		t.Fatal(err)
+	}
+	// Unchanged fields must not produce noise.
+	if _, err := f.svc.Update(f.ctx, s.ID, story.Actor{ID: f.user}, story.UpdateInput{Title: &title, Estimate: story.Some(int64(5))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.Move(f.ctx, s.ID, f.user, story.MoveInput{Section: story.SectionCurrent}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.Move(f.ctx, s.ID, f.user, story.MoveInput{Section: story.SectionCurrent}); err != nil { // reorder only
+		t.Fatal(err)
+	}
+	f.setState(t, s.ID, story.StateStarted)
+
+	d, err := f.svc.Get(f.ctx, s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, a := range d.Activity {
+		got = append(got, a.Kind+":"+a.OldValue+">"+a.NewValue)
+	}
+	want := []string{"created:>backlog", "title:Story>Renamed", "estimate:3>5", "owner:>" + strconv.FormatInt(other, 10), "moved:backlog>current", "state:unstarted>started"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("activity =\n  %v\nwant\n  %v", got, want)
+	}
+	if d.Activity[0].UserID != f.user {
+		t.Fatalf("actor = %d", d.Activity[0].UserID)
 	}
 }

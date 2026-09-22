@@ -48,7 +48,7 @@ func (f *fixture) accept(t *testing.T, typ story.Type, points int64) {
 		t.Fatal(err)
 	}
 	for _, st := range []story.State{story.StateStarted, story.StateFinished, story.StateDelivered, story.StateAccepted} {
-		if _, err := f.stories.Update(f.ctx, s.ID, f.user, story.UpdateInput{State: &st}); err != nil {
+		if _, err := f.stories.Update(f.ctx, s.ID, story.Actor{ID: f.user}, story.UpdateInput{State: &st}); err != nil {
 			t.Fatal(err)
 		}
 	}

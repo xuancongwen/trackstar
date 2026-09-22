@@ -6,13 +6,18 @@ package dbgen
 
 import (
 	"context"
+	"database/sql"
 )
 
 type Querier interface {
 	AddStoryLabel(ctx context.Context, arg AddStoryLabelParams) error
 	ClearStoryLabels(ctx context.Context, storyID int64) error
+	CountActiveAdmins(ctx context.Context) (int64, error)
 	CountCommentsByProject(ctx context.Context, projectID int64) ([]CountCommentsByProjectRow, error)
+	// Live (not deleted) story counts per project and state, for system info.
+	CountStoriesByState(ctx context.Context) ([]CountStoriesByStateRow, error)
 	CountUsers(ctx context.Context) (int64, error)
+	CreateActivity(ctx context.Context, arg CreateActivityParams) error
 	CreateComment(ctx context.Context, arg CreateCommentParams) (Comment, error)
 	CreateLabel(ctx context.Context, arg CreateLabelParams) (Label, error)
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
@@ -38,7 +43,9 @@ type Querier interface {
 	// Every story that is still "live": everything not accepted, plus stories
 	// accepted at or after the given instant (the start of the current iteration).
 	ListActiveStories(ctx context.Context, arg ListActiveStoriesParams) ([]Story, error)
+	ListActivity(ctx context.Context, storyID int64) ([]Activity, error)
 	ListComments(ctx context.Context, storyID int64) ([]Comment, error)
+	ListDeletedStories(ctx context.Context, projectID int64) ([]Story, error)
 	ListLabels(ctx context.Context, projectID int64) ([]Label, error)
 	ListProjectStoryLabels(ctx context.Context, projectID int64) ([]ListProjectStoryLabelsRow, error)
 	ListProjects(ctx context.Context) ([]Project, error)
@@ -47,13 +54,16 @@ type Querier interface {
 	ListSectionPositions(ctx context.Context, arg ListSectionPositionsParams) ([]ListSectionPositionsRow, error)
 	ListStoryLabels(ctx context.Context, storyID int64) ([]string, error)
 	ListUsers(ctx context.Context) ([]User, error)
+	PurgeDeletedStories(ctx context.Context, before sql.NullInt64) (int64, error)
 	// The pattern ('%term%', lower-cased) is built in Go; LOWER() keeps behaviour
 	// identical between SQLite and PostgreSQL. sqlc's SQLite parser has no ESCAPE
 	// support, so % and _ typed by a user simply act as wildcards.
 	SearchStories(ctx context.Context, arg SearchStoriesParams) ([]Story, error)
+	SetStoryDeleted(ctx context.Context, arg SetStoryDeletedParams) error
 	SetStoryPosition(ctx context.Context, arg SetStoryPositionParams) error
 	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)
 	UpdateStory(ctx context.Context, arg UpdateStoryParams) (Story, error)
+	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 }
 

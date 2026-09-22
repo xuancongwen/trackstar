@@ -2,10 +2,13 @@
 package story
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"slices"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"tracker/internal/apperr"
@@ -31,6 +34,24 @@ type Story struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	AcceptedAt   *time.Time `json:"accepted_at"`
+	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
+}
+
+// Activity is one recorded change to a story.
+type Activity struct {
+	ID        int64     `json:"id"`
+	StoryID   int64     `json:"story_id"`
+	UserID    int64     `json:"user_id"`
+	Kind      string    `json:"kind"` // created, state, estimate, owner, type, title, moved, restored, reopened
+	OldValue  string    `json:"old_value"`
+	NewValue  string    `json:"new_value"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Actor is who performs a change.
+type Actor struct {
+	ID      int64
+	IsAdmin bool
 }
 
 type Comment struct {
@@ -42,10 +63,11 @@ type Comment struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Detail is a story together with its comments.
+// Detail is a story together with its comments and history.
 type Detail struct {
 	Story
-	Comments []Comment `json:"comments"`
+	Comments []Comment  `json:"comments"`
+	Activity []Activity `json:"activity"`
 }
 
 type CreateInput struct {
@@ -86,14 +108,20 @@ type MoveResult struct {
 }
 
 type ListOptions struct {
-	Query string // search in title and description; includes done stories
-	Done  bool   // list stories accepted before the current iteration
+	Query   string // search in title and description; includes done stories
+	Done    bool   // list stories accepted before the current iteration
+	Deleted bool   // list soft-deleted stories (the trash)
 }
+
+// DeletedRetention is how long a deleted story can be restored.
+const DeletedRetention = 30 * 24 * time.Hour
 
 type Service struct {
 	store database.Store
 	loc   *time.Location
 	now   func() time.Time
+	// Rebalances counts position renormalizations, for /api/system/info.
+	Rebalances atomic.Int64
 }
 
 func NewService(store database.Store, loc *time.Location, now func() time.Time) *Service {
@@ -160,6 +188,9 @@ func (s *Service) Create(ctx context.Context, projectID, actorID int64, in Creat
 		if err := setLabels(ctx, q, projectID, row.ID, in.Labels); err != nil {
 			return err
 		}
+		if err := s.record(ctx, q, row.ID, actorID, "created", "", string(in.Section)); err != nil {
+			return err
+		}
 		out, err = s.load(ctx, q, row)
 		return err
 	})
@@ -179,11 +210,21 @@ func (s *Service) Get(ctx context.Context, id int64) (Detail, error) {
 	if err != nil {
 		return Detail{}, err
 	}
-	d := Detail{Story: st, Comments: make([]Comment, len(rows))}
+	d := Detail{Story: st, Comments: make([]Comment, len(rows)), Activity: []Activity{}}
 	for i, c := range rows {
 		d.Comments[i] = commentFromRow(c)
 	}
 	d.CommentCount = int64(len(rows))
+	acts, err := s.store.ListActivity(ctx, id)
+	if err != nil {
+		return Detail{}, err
+	}
+	for _, a := range acts {
+		d.Activity = append(d.Activity, Activity{
+			ID: a.ID, StoryID: a.StoryID, UserID: a.UserID, Kind: a.Kind, OldValue: a.OldValue, NewValue: a.NewValue,
+			CreatedAt: time.Unix(a.CreatedAt, 0).UTC(),
+		})
+	}
 	return d, nil
 }
 
@@ -197,6 +238,8 @@ func (s *Service) List(ctx context.Context, projectID int64, opts ListOptions) (
 	switch query := strings.ToLower(strings.TrimSpace(opts.Query)); {
 	case query != "":
 		rows, err = s.store.SearchStories(ctx, dbgen.SearchStoriesParams{ProjectID: projectID, Pattern: "%" + query + "%"})
+	case opts.Deleted:
+		rows, err = s.store.ListDeletedStories(ctx, projectID)
 	case opts.Done:
 		rows, err = s.store.ListAcceptedStories(ctx, dbgen.ListAcceptedStoriesParams{
 			ProjectID:      projectID,
@@ -241,20 +284,30 @@ func (s *Service) List(ctx context.Context, projectID int64, opts ListOptions) (
 	return out, nil
 }
 
-func (s *Service) Update(ctx context.Context, id, actorID int64, in UpdateInput) (Story, error) {
+func (s *Service) Update(ctx context.Context, id int64, actor Actor, in UpdateInput) (Story, error) {
+	actorID := actor.ID
 	var out Story
 	err := s.store.InTx(ctx, func(q dbgen.Querier) error {
 		row, err := q.GetStory(ctx, id)
 		if err != nil {
 			return notFound(err, "story")
 		}
+		if row.DeletedAt.Valid {
+			return apperr.Invalid("this story is in the trash; restore it first")
+		}
 		accepted := State(row.State) == StateAccepted
+		var acts []dbgen.CreateActivityParams
+		note := func(kind, old, new string) {
+			acts = append(acts, dbgen.CreateActivityParams{Kind: kind, OldValue: old, NewValue: new})
+		}
 
-		if in.Title != nil {
+		if in.Title != nil && strings.TrimSpace(*in.Title) != row.Title {
+			old := row.Title
 			row.Title = strings.TrimSpace(*in.Title)
 			if row.Title == "" || len(row.Title) > 500 {
 				return apperr.Invalid("title must be 1 to 500 characters")
 			}
+			note("title", old, row.Title)
 		}
 		if in.Description != nil {
 			row.Description = *in.Description
@@ -266,6 +319,7 @@ func (s *Service) Update(ctx context.Context, id, actorID int64, in UpdateInput)
 			if accepted {
 				return apperr.Invalid("an accepted story's type cannot change")
 			}
+			note("type", row.Type, string(*in.Type))
 			row.Type = string(*in.Type)
 		}
 		if in.Estimate.Set && !equalNullInt(row.Estimate, in.Estimate.Value) {
@@ -275,12 +329,14 @@ func (s *Service) Update(ctx context.Context, id, actorID int64, in UpdateInput)
 			if accepted {
 				return apperr.Invalid("an accepted story's estimate cannot change")
 			}
+			note("estimate", fmtNullInt(row.Estimate), fmtNullInt(nullInt(in.Estimate.Value)))
 			row.Estimate = nullInt(in.Estimate.Value)
 		}
-		if in.OwnerID.Set {
+		if in.OwnerID.Set && !equalNullInt(row.OwnerID, in.OwnerID.Value) {
 			if err := requireUser(ctx, q, in.OwnerID.Value, "owner"); err != nil {
 				return err
 			}
+			note("owner", fmtNullInt(row.OwnerID), fmtNullInt(nullInt(in.OwnerID.Value)))
 			row.OwnerID = nullInt(in.OwnerID.Value)
 		}
 		if in.RequesterID != nil {
@@ -298,6 +354,14 @@ func (s *Service) Update(ctx context.Context, id, actorID int64, in UpdateInput)
 			if !CanTransition(from, to) {
 				return apperr.Invalid("a story cannot go from %s to %s", from, to)
 			}
+			if from == StateAccepted {
+				// Reopening rewrites history (velocity), so it is an admin action.
+				if !actor.IsAdmin {
+					return apperr.Forbidden("only an administrator can reopen an accepted story")
+				}
+				row.AcceptedAt = sql.NullInt64{}
+				note("reopened", "", "")
+			}
 			if SectionOf(to) != SectionOf(from) {
 				pos, _, err := place(ctx, q, row.ProjectID, SectionOf(to), row.ID, placement{bottom: true})
 				if err != nil {
@@ -307,10 +371,12 @@ func (s *Service) Update(ctx context.Context, id, actorID int64, in UpdateInput)
 			}
 			if to == StateStarted && !row.OwnerID.Valid {
 				row.OwnerID = sql.NullInt64{Int64: actorID, Valid: true}
+				note("owner", "", strconv.FormatInt(actorID, 10))
 			}
 			if to == StateAccepted {
 				row.AcceptedAt = sql.NullInt64{Int64: s.now().Unix(), Valid: true}
 			}
+			note("state", string(from), string(to))
 			row.State = string(to)
 		}
 
@@ -323,6 +389,11 @@ func (s *Service) Update(ctx context.Context, id, actorID int64, in UpdateInput)
 				return err
 			}
 		}
+		for _, a := range acts {
+			if err := s.record(ctx, q, row.ID, actorID, a.Kind, a.OldValue, a.NewValue); err != nil {
+				return err
+			}
+		}
 		out, err = s.save(ctx, q, row)
 		return err
 	})
@@ -331,7 +402,7 @@ func (s *Service) Update(ctx context.Context, id, actorID int64, in UpdateInput)
 
 // Move reorders a story and/or drags it into another section. State and
 // position change in one transaction.
-func (s *Service) Move(ctx context.Context, id int64, in MoveInput) (MoveResult, error) {
+func (s *Service) Move(ctx context.Context, id int64, actorID int64, in MoveInput) (MoveResult, error) {
 	if in.Section != SectionIcebox && in.Section != SectionBacklog && in.Section != SectionCurrent {
 		return MoveResult{}, apperr.Invalid("section must be icebox, backlog or current")
 	}
@@ -343,6 +414,8 @@ func (s *Service) Move(ctx context.Context, id int64, in MoveInput) (MoveResult,
 		}
 		state := State(row.State)
 		switch {
+		case row.DeletedAt.Valid:
+			return apperr.Invalid("this story is in the trash; restore it first")
 		case state == StateAccepted:
 			return apperr.Invalid("accepted stories cannot be moved")
 		case inProgress(state) && in.Section != SectionCurrent:
@@ -350,10 +423,16 @@ func (s *Service) Move(ctx context.Context, id int64, in MoveInput) (MoveResult,
 		}
 		if SectionOf(state) != in.Section {
 			row.State = string(entryState(in.Section))
+			if err := s.record(ctx, q, row.ID, actorID, "moved", string(SectionOf(state)), string(in.Section)); err != nil {
+				return err
+			}
 		}
 		pos, renormalized, err := place(ctx, q, row.ProjectID, in.Section, row.ID, placement{prevID: in.PrevID, nextID: in.NextID})
 		if err != nil {
 			return err
+		}
+		if renormalized {
+			s.Rebalances.Add(1)
 		}
 		row.Position = pos
 		res.Renormalized = renormalized
@@ -363,17 +442,105 @@ func (s *Service) Move(ctx context.Context, id int64, in MoveInput) (MoveResult,
 	return res, err
 }
 
-func (s *Service) Delete(ctx context.Context, id int64) error {
-	return s.store.InTx(ctx, func(q dbgen.Querier) error {
+// Delete moves a story to the trash. It disappears from every list but can
+// be restored for DeletedRetention; Purge removes it for good afterwards.
+func (s *Service) Delete(ctx context.Context, id, actorID int64) (Story, error) {
+	var out Story
+	err := s.store.InTx(ctx, func(q dbgen.Querier) error {
 		row, err := q.GetStory(ctx, id)
 		if err != nil {
 			return notFound(err, "story")
 		}
-		if err := q.DeleteStory(ctx, id); err != nil {
+		if row.DeletedAt.Valid {
+			return apperr.NotFound("story")
+		}
+		now := s.now().Unix()
+		if err := q.SetStoryDeleted(ctx, dbgen.SetStoryDeletedParams{ID: id, DeletedAt: sql.NullInt64{Int64: now, Valid: true}, Now: now}); err != nil {
 			return err
 		}
-		return q.DeleteUnusedLabels(ctx, row.ProjectID)
+		if err := s.record(ctx, q, id, actorID, "deleted", "", ""); err != nil {
+			return err
+		}
+		row.DeletedAt = sql.NullInt64{Int64: now, Valid: true}
+		out, err = s.load(ctx, q, row)
+		return err
 	})
+	return out, err
+}
+
+// Restore takes a story out of the trash and puts it at the bottom of the
+// section it was in. Accepted stories keep their acceptance.
+func (s *Service) Restore(ctx context.Context, id, actorID int64) (Story, error) {
+	var out Story
+	err := s.store.InTx(ctx, func(q dbgen.Querier) error {
+		row, err := q.GetStory(ctx, id)
+		if err != nil {
+			return notFound(err, "story")
+		}
+		if !row.DeletedAt.Valid {
+			return apperr.Invalid("story is not deleted")
+		}
+		now := s.now().Unix()
+		if err := q.SetStoryDeleted(ctx, dbgen.SetStoryDeletedParams{ID: id, DeletedAt: sql.NullInt64{}, Now: now}); err != nil {
+			return err
+		}
+		row.DeletedAt = sql.NullInt64{}
+		if State(row.State) != StateAccepted {
+			pos, _, err := place(ctx, q, row.ProjectID, SectionOf(State(row.State)), row.ID, placement{bottom: true})
+			if err != nil {
+				return err
+			}
+			row.Position = pos
+		}
+		if err := s.record(ctx, q, id, actorID, "restored", "", ""); err != nil {
+			return err
+		}
+		out, err = s.save(ctx, q, row)
+		return err
+	})
+	return out, err
+}
+
+// Purge permanently removes stories deleted more than DeletedRetention ago.
+// It is called at startup; there is no background worker.
+func (s *Service) Purge(ctx context.Context) (int64, error) {
+	var n int64
+	err := s.store.InTx(ctx, func(q dbgen.Querier) error {
+		var err error
+		n, err = q.PurgeDeletedStories(ctx, sql.NullInt64{Int64: s.now().Add(-DeletedRetention).Unix(), Valid: true})
+		if err != nil || n == 0 {
+			return err
+		}
+		projects, err := q.ListProjects(ctx)
+		if err != nil {
+			return err
+		}
+		for _, p := range projects {
+			if err := q.DeleteUnusedLabels(ctx, p.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return n, err
+}
+
+// LargestSection returns the most stories any single ordering scope holds.
+func (s *Service) LargestSection(ctx context.Context) (int, error) {
+	rows, err := s.store.CountStoriesByState(ctx)
+	if err != nil {
+		return 0, err
+	}
+	sizes := map[[2]string]int64{}
+	for _, r := range rows {
+		key := [2]string{strconv.FormatInt(r.ProjectID, 10), string(SectionOf(State(r.State)))}
+		sizes[key] += r.Total
+	}
+	var largest int64
+	for _, n := range sizes {
+		largest = max(largest, n)
+	}
+	return int(largest), nil
 }
 
 func (s *Service) AddComment(ctx context.Context, storyID, actorID int64, body string) (Comment, error) {
@@ -381,8 +548,8 @@ func (s *Service) AddComment(ctx context.Context, storyID, actorID int64, body s
 	if body == "" {
 		return Comment{}, apperr.Invalid("comment body is required")
 	}
-	if _, err := s.store.GetStory(ctx, storyID); err != nil {
-		return Comment{}, notFound(err, "story")
+	if st, err := s.store.GetStory(ctx, storyID); err != nil || st.DeletedAt.Valid {
+		return Comment{}, notFound(cmp.Or(err, sql.ErrNoRows), "story")
 	}
 	row, err := s.store.CreateComment(ctx, dbgen.CreateCommentParams{
 		StoryID: storyID, UserID: actorID, Body: body, Now: s.now().Unix(),
@@ -553,7 +720,24 @@ func fromRow(r dbgen.Story, currentStart time.Time) Story {
 			st.Section = SectionDone
 		}
 	}
+	if r.DeletedAt.Valid {
+		at := time.Unix(r.DeletedAt.Int64, 0).UTC()
+		st.DeletedAt = &at
+	}
 	return st
+}
+
+func (s *Service) record(ctx context.Context, q dbgen.Querier, storyID, actorID int64, kind, old, new string) error {
+	return q.CreateActivity(ctx, dbgen.CreateActivityParams{
+		StoryID: storyID, UserID: actorID, Kind: kind, OldValue: old, NewValue: new, Now: s.now().Unix(),
+	})
+}
+
+func fmtNullInt(v sql.NullInt64) string {
+	if !v.Valid {
+		return ""
+	}
+	return strconv.FormatInt(v.Int64, 10)
 }
 
 func commentFromRow(r dbgen.Comment) Comment {

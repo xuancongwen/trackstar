@@ -48,8 +48,17 @@ you land on the board:
   (N = 3 by default; 10 is assumed until one iteration has completed).
 - Iterations are automatic: length (1–4 weeks) and start weekday are project
   settings; nothing needs to be "closed".
-- Changes by teammates appear live (typically within ~200 ms). The dot in the
-  top bar is green while the live stream is connected.
+- Changes by teammates appear live (typically within ~200 ms) and the changed
+  row flashes briefly. The dot in the top bar is green while the live stream is
+  connected.
+- Every story keeps a history (state changes, estimates, owners, moves,
+  renames) interleaved with its comments in the drawer.
+- Deleting a story moves it to the **Trash** for 30 days: undo from the toast,
+  or restore from the Trash panel. Purge happens at startup, no worker.
+- Your name and password live under *your name ▸ Account*. Administrators get
+  *Users*: rename, promote/demote, deactivate/reactivate, reset a password.
+  Administrators can also **Reopen** an accepted story (it drops out of
+  velocity history).
 
 | Key | Action |
 |---|---|
@@ -81,6 +90,7 @@ SQLite (WAL)                                              ◀── db/migration
 
 ```
 cmd/tracker/          main: serve | migrate | backup | check | reset-password | healthcheck | version
+.github/workflows/    ci.yml (lint, generated-code check, tests, e2e, Docker probe), release.yml (tagged releases)
 internal/api/         handlers, middleware (request id, logging, origin check, trusted proxies), SSE stream
 internal/events/      in-process change hub: Publish(project) → every open stream of that project
 internal/auth/        bcrypt passwords, server-side sessions (HMAC-hashed tokens), login rate limit
@@ -140,7 +150,8 @@ server; data lives in `./data`.
 
 ```sh
 make test       # go test ./...  +  vitest
-make lint       # go vet, gofmt, svelte-check (+ shellcheck when installed)
+make e2e        # headless-Chromium end-to-end tests against bin/tracker (web/e2e/*.mjs)
+make lint       # go vet, gofmt, svelte-check, shellcheck
 make sqlc       # regenerate internal/database/dbgen after editing db/queries or migrations
 make migrate    # apply migrations to ./data/tracker.db without starting the server
 ```
@@ -149,7 +160,16 @@ Tests use temporary SQLite databases (`database.NewTestDB`) and cover
 migrations, auth, story creation, state transitions, ordering, moves between
 panels, position normalisation, iterations, velocity and the HTTP API. The
 frontend tests cover the board logic (move requests, optimistic moves, backlog
-projection), the SortableJS adapter, and the story row's workflow buttons.
+projection), the SortableJS adapter, the live-update client and the story
+row's workflow buttons. `make e2e` drives the real binary in headless
+Chromium: drag/drop (rows and empty column space), keyboard, workflow buttons,
+search, trash/undo, the account dialog, and — with two browsers — live sync.
+
+CI (`.github/workflows/ci.yml`) runs all of that plus a check that
+`internal/database/dbgen` matches `db/queries`, and builds the Docker image
+and probes `/health`. Pushing a tag `v*` runs `release.yml`, which publishes
+`tracker-<tag>-linux-{amd64,arm64}.tar.gz` and `SHA256SUMS` as a GitHub
+release — the layout `setup.sh --repo` and `update.sh` expect.
 
 Adding a migration: create `db/migrations/sqlite/0000N_name.sql` (goose
 format), run `make sqlc`. Migrations are embedded and applied at startup.
@@ -195,7 +215,9 @@ See [`deploy/tracker.env.example`](deploy/tracker.env.example).
 Logs are JSON lines on stdout (journald under systemd): `time`, `level`,
 `method`, `path`, `status`, `duration_ms`, `request_id`, `remote_ip`.
 `GET /api/system/info` (admins) reports version, Go version, database driver
-and size, uptime and memory.
+and size, uptime, memory, open live streams, and two ordering health numbers:
+`position_rebalances` (renormalisations since start; rare by design) and
+`largest_section` (most stories in one ordering scope).
 
 ## SQLite design
 
@@ -385,16 +407,19 @@ JSON over cookies; errors are `{"error": "…"}` with 401/403/404/409/422/429.
 
 ```
 POST   /api/auth/register | /api/auth/login | /api/auth/logout
-GET    /api/me            GET /api/users        GET /api/config
+GET    /api/me            PATCH /api/me {display_name, current_password, new_password}
+GET    /api/users         PATCH /api/users/:id {display_name, is_admin, is_active}   POST /api/users/:id/password   (admin)
+GET    /api/config
 GET    /api/projects      POST /api/projects
 GET    /api/projects/:id  PATCH … DELETE …       (:id may be the numeric id or the slug)
-GET    /api/projects/:id/stories[?q=text | ?section=done]
+GET    /api/projects/:id/stories[?q=text | ?section=done | ?section=deleted]
 POST   /api/projects/:id/stories     {title, type?, estimate?, section?, description?, owner_id?, labels?}
 GET    /api/projects/:id/labels | /iterations | /velocity
 GET    /api/projects/:id/events      text/event-stream; events "stories" and "project", data {project_id, story_id, client}
-GET    /api/stories/:id              (with comments)
+GET    /api/stories/:id              (with comments and activity)
 PATCH  /api/stories/:id              {title, description, type, state, estimate|null, owner_id|null, requester_id, labels}
-DELETE /api/stories/:id
+DELETE /api/stories/:id              → the trashed story (soft delete, 30-day retention)
+POST   /api/stories/:id/restore
 POST   /api/stories/:id/move         {section, prev_id | next_id}   → {story, renormalized}
 POST   /api/stories/:id/comments     {body}        DELETE /api/comments/:id
 GET    /api/system/info              (admin)
@@ -442,6 +467,7 @@ runtime plus the pure-Go SQLite engine; the page cache is capped at 8 MB.
 | `403 cross-origin request rejected` | The page's origin is neither `TRACKER_PUBLIC_URL` nor the request's Host. Fix the public URL; make your reverse proxy pass `Host` through. |
 | Every request logs the proxy's IP | Add the proxy to `TRACKER_TRUSTED_PROXIES`. |
 | `429` on login | 20 attempts per 5 minutes per client IP; wait, or restart the service. |
+| "this account has been deactivated" | An administrator deactivated the account; another admin can reactivate it under *Users*. |
 | Forgotten password | On the server: `sudo -u tracker sh -c 'set -a; . /etc/tracker/tracker.env; exec tracker reset-password you@example.com'` (reads the new password from stdin, revokes sessions). |
 | "registration is disabled" | `TRACKER_ALLOW_REGISTRATION=false` and an account exists. Enable it briefly to add a teammate. |
 | `database is locked` | Another process holds a long write lock (an open `sqlite3` shell?). Tracker waits 5 s. |
@@ -452,16 +478,16 @@ runtime plus the pure-Go SQLite engine; the page cache is capped at 8 MB.
 
 ## Known limitations
 
-- Single team: no organisations, roles or per-project membership. No e-mail,
-  so password resets are done on the server (see Troubleshooting).
+- Single team: every user sees every project; the only role is administrator.
+  No e-mail, so a forgotten password is reset by an administrator (*Users*) or
+  on the server (see Troubleshooting).
 - Changing a project's iteration length or start weekday renumbers past
   iterations (they are derived, not stored).
 - Live updates are per process: running two instances behind one load
   balancer would need a shared bus (PostgreSQL `LISTEN/NOTIFY`).
 - Search is a substring match (`%` and `_` act as wildcards); no ranking.
-- Deleting a story is permanent (no archive/undo); accepted stories cannot be
-  reopened.
-- No attachments, epics, tasks, story blockers, activity history or
-  notifications.
+- Deleted stories are purged 30 days after deletion; there is no archive
+  beyond that.
+- No attachments, epics, tasks, story blockers or notifications.
 - PostgreSQL is designed for but not implemented.
 - The Svelte UI is desktop-first; on narrow screens the panels scroll sideways.

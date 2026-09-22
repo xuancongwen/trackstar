@@ -47,7 +47,9 @@ var transitions = map[State][]State{
 	StateFinished:  {StateDelivered, StateStarted},
 	StateDelivered: {StateAccepted, StateRejected},
 	StateRejected:  {StateStarted},
-	StateAccepted:  {},
+	// Reopening an accepted story is allowed for administrators only (checked
+	// by the service), and puts it back in front of the acceptor.
+	StateAccepted: {StateDelivered},
 }
 
 func (s State) Valid() bool { _, ok := transitions[s]; return ok }

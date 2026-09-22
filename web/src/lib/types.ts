@@ -19,6 +19,7 @@ export interface User {
   email: string
   display_name: string
   is_admin: boolean
+  is_active: boolean
 }
 
 export interface Project {
@@ -48,6 +49,17 @@ export interface Story {
   created_at: string
   updated_at: string
   accepted_at: string | null
+  deleted_at?: string | null
+}
+
+export interface Activity {
+  id: number
+  story_id: number
+  user_id: number
+  kind: 'created' | 'title' | 'type' | 'estimate' | 'owner' | 'state' | 'moved' | 'deleted' | 'restored' | 'reopened' | string
+  old_value: string
+  new_value: string
+  created_at: string
 }
 
 export interface Comment {
@@ -60,6 +72,7 @@ export interface Comment {
 
 export interface StoryDetail extends Story {
   comments: Comment[]
+  activity: Activity[]
 }
 
 export interface Iteration {

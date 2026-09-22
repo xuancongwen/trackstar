@@ -30,6 +30,11 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
+	largest, err := s.Stories.LargestSection(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":               s.Version,
 		"go_version":            runtime.Version(),
@@ -38,6 +43,8 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 		"uptime_seconds":        int64(time.Since(s.started).Seconds()),
 		"memory_sys_bytes":      mem.Sys,
 		"goroutines":            runtime.NumGoroutine(),
+		"position_rebalances":   s.Stories.Rebalances.Load(),
+		"largest_section":       largest,
 		"event_streams":         s.Events.Subscribers(0),
 		"event_streams_dropped": s.Events.Dropped.Load(),
 	})

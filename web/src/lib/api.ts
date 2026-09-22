@@ -49,7 +49,12 @@ export const api = {
   register: (email: string, password: string, display_name: string) =>
     request<User>('POST', '/api/auth/register', { email, password, display_name }),
   logout: () => request<void>('POST', '/api/auth/logout'),
+  updateMe: (input: { display_name?: string; current_password?: string; new_password?: string }) =>
+    request<User>('PATCH', '/api/me', input),
   users: () => request<User[]>('GET', '/api/users'),
+  updateUser: (id: number, input: { display_name?: string; is_admin?: boolean; is_active?: boolean }) =>
+    request<User>('PATCH', `/api/users/${id}`, input),
+  setUserPassword: (id: number, password: string) => request<void>('POST', `/api/users/${id}/password`, { password }),
 
   projects: () => request<Project[]>('GET', '/api/projects'),
   project: (ref: string | number) => request<Project>('GET', `/api/projects/${ref}`),
@@ -57,10 +62,11 @@ export const api = {
   updateProject: (id: number, input: Partial<Project>) => request<Project>('PATCH', `/api/projects/${id}`, input),
   deleteProject: (id: number) => request<void>('DELETE', `/api/projects/${id}`),
 
-  stories: (projectId: number, opts: { q?: string; done?: boolean } = {}) => {
+  stories: (projectId: number, opts: { q?: string; done?: boolean; deleted?: boolean } = {}) => {
     const params = new URLSearchParams()
     if (opts.q) params.set('q', opts.q)
     if (opts.done) params.set('section', 'done')
+    if (opts.deleted) params.set('section', 'deleted')
     const qs = params.toString()
     return request<Story[]>('GET', `/api/projects/${projectId}/stories${qs ? `?${qs}` : ''}`)
   },
@@ -68,7 +74,8 @@ export const api = {
     request<Story>('POST', `/api/projects/${projectId}/stories`, input),
   story: (id: number) => request<StoryDetail>('GET', `/api/stories/${id}`),
   updateStory: (id: number, patch: StoryPatch) => request<Story>('PATCH', `/api/stories/${id}`, patch),
-  deleteStory: (id: number) => request<void>('DELETE', `/api/stories/${id}`),
+  deleteStory: (id: number) => request<Story>('DELETE', `/api/stories/${id}`),
+  restoreStory: (id: number) => request<Story>('POST', `/api/stories/${id}/restore`),
   moveStory: (id: number, move: MoveRequest) => request<MoveResult>('POST', `/api/stories/${id}/move`, move),
   addComment: (storyId: number, body: string) =>
     request<Comment>('POST', `/api/stories/${storyId}/comments`, { body }),

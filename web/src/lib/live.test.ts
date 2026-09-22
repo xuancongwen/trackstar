@@ -22,13 +22,13 @@ class FakeEventSource {
 }
 
 describe('connectLive', () => {
-  let onChange: ReturnType<typeof vi.fn<() => void>>
+  let onChange: ReturnType<typeof vi.fn<(ids: number[]) => void>>
   let statuses: LiveStatus[]
 
   beforeEach(() => {
     vi.useFakeTimers()
     FakeEventSource.instances = []
-    onChange = vi.fn<() => void>()
+    onChange = vi.fn<(ids: number[]) => void>()
     statuses = []
   })
   afterEach(() => vi.useRealTimers())
@@ -55,6 +55,7 @@ describe('connectLive', () => {
     expect(onChange).not.toHaveBeenCalled()
     vi.advanceTimersByTime(200)
     expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith([1, 2])
   })
 
   it('ignores echoes of this tab but not events without a client', () => {

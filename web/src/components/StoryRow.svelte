@@ -8,11 +8,13 @@
     users: Map<number, User>
     selected?: boolean
     busy?: boolean
+    /** Just changed by someone else. */
+    recent?: boolean
     onopen: (story: Story) => void
     onaction: (story: Story, state: StoryState) => void
     onestimate: (story: Story, points: number) => void
   }
-  let { story, users, selected = false, busy = false, onopen, onaction, onestimate }: Props = $props()
+  let { story, users, selected = false, busy = false, recent = false, onopen, onaction, onestimate }: Props = $props()
 
   const TYPE_GLYPH = { feature: '★', bug: '●', chore: '⚙' } as const
 
@@ -24,6 +26,7 @@
 <div
   class="story {story.state}"
   class:selected
+  class:recent
   class:locked={!canDrag(story)}
   data-story-id={story.id}
   data-no-drag={canDrag(story) ? undefined : ''}
@@ -108,6 +111,14 @@
   }
   .story.accepted {
     background: var(--row-accepted);
+  }
+  .story.recent {
+    animation: recent-flash 2.5s ease-out;
+  }
+  @keyframes recent-flash {
+    from {
+      background: color-mix(in srgb, var(--accent) 35%, var(--row));
+    }
   }
   .story.selected {
     border-left-color: var(--accent);

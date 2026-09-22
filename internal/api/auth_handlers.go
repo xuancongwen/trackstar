@@ -6,6 +6,7 @@ import (
 
 	"tracker/internal/apperr"
 	"tracker/internal/auth"
+	"tracker/internal/user"
 )
 
 const sessionCookie = "tracker_session"
@@ -112,4 +113,90 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, users)
+}
+
+// handleUpdateMe changes the caller's display name and/or password.
+func (s *Server) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		DisplayName     *string `json:"display_name"`
+		CurrentPassword string  `json:"current_password"`
+		NewPassword     string  `json:"new_password"`
+	}
+	if err := decode(w, r, &in); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	me := currentUser(r.Context())
+	if in.NewPassword != "" {
+		if err := s.Auth.ChangePassword(r.Context(), me.ID, in.CurrentPassword, in.NewPassword, sessionToken(r)); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	if in.DisplayName != nil {
+		u, err := s.Users.Rename(r.Context(), me.ID, *in.DisplayName)
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		me = u
+	}
+	writeJSON(w, http.StatusOK, me)
+}
+
+func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if !currentUser(r.Context()).IsAdmin {
+		s.fail(w, r, apperr.Forbidden("administrators only"))
+		return false
+	}
+	return true
+}
+
+// handleUpdateUser lets an administrator rename, promote/demote or
+// (de)activate an account.
+func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	id, err := pathID(r, "id")
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	var in user.AdminUpdate
+	if err := decode(w, r, &in); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	u, err := s.Users.Update(r.Context(), currentUser(r.Context()).ID, id, in)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
+// handleSetUserPassword is the administrator's password reset: the new
+// password is set and the user is signed out everywhere.
+func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	id, err := pathID(r, "id")
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	var in struct {
+		Password string `json:"password"`
+	}
+	if err := decode(w, r, &in); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.Auth.SetPasswordByID(r.Context(), id, in.Password); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

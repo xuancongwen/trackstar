@@ -137,6 +137,19 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (user.User, er
 // SetPassword replaces a user's password and signs them out everywhere. It
 // backs the `tracker reset-password` command; there is no e-mail flow.
 func (s *Service) SetPassword(ctx context.Context, email, password string) error {
+	return s.setPassword(ctx, password, func(q dbgen.Querier) (dbgen.User, error) {
+		return q.GetUserByEmail(ctx, normalizeEmail(email))
+	})
+}
+
+// SetPasswordByID is SetPassword for an administrator's reset of user id.
+func (s *Service) SetPasswordByID(ctx context.Context, id int64, password string) error {
+	return s.setPassword(ctx, password, func(q dbgen.Querier) (dbgen.User, error) {
+		return q.GetUser(ctx, id)
+	})
+}
+
+func (s *Service) setPassword(ctx context.Context, password string, find func(dbgen.Querier) (dbgen.User, error)) error {
 	if len(password) < minPasswordLength || len(password) > maxPasswordLength {
 		return apperr.Invalid("password must be %d to %d characters", minPasswordLength, maxPasswordLength)
 	}
@@ -145,7 +158,7 @@ func (s *Service) SetPassword(ctx context.Context, email, password string) error
 		return err
 	}
 	return s.store.InTx(ctx, func(q dbgen.Querier) error {
-		row, err := q.GetUserByEmail(ctx, normalizeEmail(email))
+		row, err := find(q)
 		if database.IsNotFound(err) {
 			return apperr.NotFound("user")
 		}
@@ -156,6 +169,29 @@ func (s *Service) SetPassword(ctx context.Context, email, password string) error
 			return err
 		}
 		return q.DeleteUserSessions(ctx, row.ID)
+	})
+}
+
+// ChangePassword lets a signed-in user change their own password after
+// proving the current one. Other sessions are revoked; keepToken survives.
+func (s *Service) ChangePassword(ctx context.Context, userID int64, current, next, keepToken string) error {
+	row, err := s.store.GetUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(row.PasswordHash), []byte(current)) != nil {
+		return apperr.Invalid("current password is incorrect")
+	}
+	if err := s.SetPassword(ctx, row.Email, next); err != nil {
+		return err
+	}
+	if keepToken == "" {
+		return nil
+	}
+	// SetPassword dropped every session; re-create the caller's under the same token.
+	now := s.now()
+	return s.store.CreateSession(ctx, dbgen.CreateSessionParams{
+		TokenHash: s.hashToken(keepToken), UserID: userID, CreatedAt: now.Unix(), ExpiresAt: now.Add(SessionTTL).Unix(),
 	})
 }
 
@@ -171,6 +207,9 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, us
 	}
 	if bcrypt.CompareHashAndPassword(hash, []byte(password)) != nil || err != nil {
 		return "", user.User{}, apperr.Unauthorized("invalid email or password")
+	}
+	if !row.IsActive {
+		return "", user.User{}, apperr.Forbidden("this account has been deactivated")
 	}
 	token, err := s.StartSession(ctx, row.ID)
 	if err != nil {

@@ -4,7 +4,7 @@ import { makeStory } from '../lib/testing'
 import type { Story, User } from '../lib/types'
 import StoryRow from './StoryRow.svelte'
 
-const sam: User = { id: 1, email: 'sam@example.com', display_name: 'Sam Wen', is_admin: true }
+const sam: User = { id: 1, email: 'sam@example.com', display_name: 'Sam Wen', is_admin: true, is_active: true }
 
 function setup(story: Story) {
   const handlers = { onopen: vi.fn(), onaction: vi.fn(), onestimate: vi.fn() }

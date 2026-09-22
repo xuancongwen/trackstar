@@ -13,8 +13,9 @@ func (s *Server) handleListStories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stories, err := s.Stories.List(r.Context(), p.ID, story.ListOptions{
-		Query: r.URL.Query().Get("q"),
-		Done:  r.URL.Query().Get("section") == string(story.SectionDone),
+		Query:   r.URL.Query().Get("q"),
+		Done:    r.URL.Query().Get("section") == string(story.SectionDone),
+		Deleted: r.URL.Query().Get("section") == "deleted",
 	})
 	if err != nil {
 		s.fail(w, r, err)
@@ -82,7 +83,8 @@ func (s *Server) handleUpdateStory(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	st, err := s.Stories.Update(r.Context(), id, currentUser(r.Context()).ID, in)
+	u := currentUser(r.Context())
+	st, err := s.Stories.Update(r.Context(), id, story.Actor{ID: u.ID, IsAdmin: u.IsAdmin}, in)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -97,18 +99,28 @@ func (s *Server) handleDeleteStory(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	// Look the project up first: the row is gone after the delete.
-	d, err := s.Stories.Get(r.Context(), id)
+	st, err := s.Stories.Delete(r.Context(), id, currentUser(r.Context()).ID)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	if err := s.Stories.Delete(r.Context(), id); err != nil {
+	writeJSON(w, http.StatusOK, st) // the trashed story, so the client can offer undo
+	s.publish(r, "stories", st.ProjectID, id)
+}
+
+func (s *Server) handleRestoreStory(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
-	s.publish(r, "stories", d.ProjectID, id)
+	st, err := s.Stories.Restore(r.Context(), id, currentUser(r.Context()).ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+	s.publish(r, "stories", st.ProjectID, id)
 }
 
 func (s *Server) handleMoveStory(w http.ResponseWriter, r *http.Request) {
@@ -122,7 +134,7 @@ func (s *Server) handleMoveStory(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	res, err := s.Stories.Move(r.Context(), id, in)
+	res, err := s.Stories.Move(r.Context(), id, currentUser(r.Context()).ID, in)
 	if err != nil {
 		s.fail(w, r, err)
 		return
