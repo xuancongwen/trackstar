@@ -42,6 +42,10 @@ export function sortableList(el: HTMLElement, options: SortableListOptions) {
     ghostClass: 'drag-ghost',
     chosenClass: 'drag-chosen',
     forceFallback: false,
+    // Dropping outside every accepting list (rejected by canDrop, on a header,
+    // in the gap between columns) puts the row back instead of leaving it
+    // wherever the drag path last passed through.
+    revertOnSpill: true,
     onStart(evt) {
       originalNext = evt.item.nextSibling
       opts.onDragState?.(true)

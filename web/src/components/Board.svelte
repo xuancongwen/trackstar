@@ -48,7 +48,7 @@
   let query = $state('')
   let matches = $state<Set<number> | null>(null)
   let busyIds = $state(new Set<number>())
-  let dragging = false
+  let dragging = $state(false)
   let toast = $state('')
   let loadError = $state('')
   let searchInput = $state<HTMLInputElement>()
@@ -380,6 +380,7 @@
           {busyIds}
           summary={summaries[section]}
           dragDisabled={matches !== null}
+          {dragging}
           canDrop={mayDrop}
           ondrop={onDrop}
           ondragstate={(d) => (dragging = d)}

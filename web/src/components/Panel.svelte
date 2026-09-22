@@ -17,6 +17,8 @@
     /** Rendered above the sortable list (accepted stories, progress…). */
     top?: Snippet
     dragDisabled?: boolean
+    /** A drag is in progress somewhere on the board. */
+    dragging?: boolean
     canDrop: (storyId: number, target: DropSection) => boolean
     ondrop: (event: DropEvent) => void
     ondragstate: (dragging: boolean) => void
@@ -34,6 +36,7 @@
     summary = '',
     top,
     dragDisabled = false,
+    dragging = false,
     canDrop,
     ondrop,
     ondragstate,
@@ -55,9 +58,12 @@
 
   <div class="scroll">
     {@render top?.()}
+    <!-- The list fills the rest of the column, so dropping anywhere below the
+         last row appends to the end. -->
     <div
       class="list"
       class:empty={storyCount === 0}
+      class:dragging
       use:sortableList={{
         section,
         canDrop: (id, target) => !dragDisabled && canDrop(id, target),
@@ -83,12 +89,12 @@
           />
         {/if}
       {/each}
+      {#if storyCount === 0}
+        <p class="hint muted" data-no-drag>
+          {dragDisabled ? 'No matching stories.' : 'Nothing here. Drag a story in or press +.'}
+        </p>
+      {/if}
     </div>
-    {#if storyCount === 0}
-      <p class="hint muted">
-        {dragDisabled ? 'No matching stories.' : 'Nothing here. Drag a story in or press +.'}
-      </p>
-    {/if}
   </div>
 </section>
 
@@ -140,11 +146,15 @@
     flex-direction: column;
   }
   .list {
-    min-height: 8px;
-  }
-  /* An empty list must still be a comfortable drop target. */
-  .list.empty {
+    flex: 1;
     min-height: 56px;
+    border-radius: 4px;
+    outline: 2px dashed transparent;
+    outline-offset: -4px;
+    transition: outline-color 120ms;
+  }
+  .list.dragging {
+    outline-color: var(--border);
   }
   .marker {
     display: flex;
