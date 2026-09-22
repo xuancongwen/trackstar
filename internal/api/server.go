@@ -13,6 +13,7 @@ import (
 
 	"trackstar/internal/auth"
 	"trackstar/internal/events"
+	"trackstar/internal/mcpserver"
 	"trackstar/internal/project"
 	"trackstar/internal/story"
 	"trackstar/internal/user"
@@ -116,6 +117,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such endpoint")
 	})
+
+	// MCP for AI agents: the same services behind the same authentication.
+	// Agents authenticate with an API token; a browser session works too.
+	mux.Handle("/mcp", s.requireUser(mcpserver.Handler(mcpserver.Deps{
+		Projects: s.Projects, Stories: s.Stories, Velocity: s.Velocity, Users: s.Users,
+		Events: s.Events, Logger: s.Logger, Version: s.Version,
+	}, func(r *http.Request) (user.User, bool) {
+		u := currentUser(r.Context())
+		return u, u.ID != 0
+	})))
 	mux.Handle("/", s.frontendHandler())
 
 	var h http.Handler = mux

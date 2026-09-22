@@ -27,6 +27,7 @@ board. One Go binary, one SQLite file, no other services.
 - [Backups and restore](#backups-and-restore)
 - [Updates and deploys](#updates-and-deploys)
 - [API](#api)
+- [MCP for AI agents](#mcp-for-ai-agents)
 - [Resource usage](#resource-usage)
 - [Troubleshooting](#troubleshooting)
 - [Known limitations](#known-limitations)
@@ -123,6 +124,7 @@ SQLite (WAL)                                              ◀── db/migration
 cmd/trackstar/          main: serve | migrate | backup | check | reset-password | healthcheck | version
 .github/workflows/    ci.yml (lint, generated-code check, tests, e2e, Docker probe), release.yml (tagged releases)
 internal/api/         handlers, middleware (request id, logging, origin check, trusted proxies), SSE stream
+internal/mcpserver/   MCP tools and resources over the same services, mounted at /mcp behind the same auth
 internal/events/      in-process change hub: Publish(project) → every open stream of that project
 internal/auth/        bcrypt passwords, server-side sessions (HMAC-hashed tokens), login rate limit
 internal/config/      TRACKSTAR_* environment → validated Config
@@ -240,8 +242,8 @@ The installed layout is:
 /opt/trackstar/scripts/           update.sh, backup.sh, restore.sh, …
 ```
 
-The binary serves the frontend on `/`, the API on `/api/*` and `GET /health`
-(`{"status":"ok"}`, checks the database, no authentication).
+The binary serves the frontend on `/`, the API on `/api/*`, MCP on `/mcp`
+and `GET /health` (`{"status":"ok"}`, checks the database, no authentication).
 
 ## Configuration
 
@@ -516,6 +518,46 @@ GET    /health
 `GET /api/projects/:id/velocity` →
 `{"velocity":11,"average":11.0,"window":3,"estimated":false,"iterations":[{"number":12,"points":10},…]}`
 
+## MCP for AI agents
+
+The same binary serves a [Model Context Protocol](https://modelcontextprotocol.io)
+endpoint at `/mcp` (Streamable HTTP, stateless), so Claude Code, Claude
+Desktop or any MCP client can read and update the board. It is a thin layer
+over the same services as the REST API: identical access rules, validation,
+activity log and live updates (open boards refresh when an agent changes a
+story). Authenticate with a personal API token from *your name ▸ Account*:
+
+```sh
+claude mcp add trackstar --transport http https://track.example.com/mcp \
+  --header "Authorization: Bearer tst_…"
+```
+
+Tools (a project is named by numeric id or slug):
+
+| Tool | What it does |
+|---|---|
+| `list_projects` | projects you can see, with iteration settings |
+| `list_users` | ids → names, so `owner_id` can be resolved; includes `me` |
+| `list_stories` | a project's stories in board order; `section` (icebox, backlog, current, done) and `query` filters |
+| `get_story` | one story with comments, tasks and activity |
+| `create_story` | title, type, estimate, section, owner, labels |
+| `update_story` | any field or the workflow `state`; `clear_owner` / `clear_estimate` to unset |
+| `move_story` | to a section, after `prev_id` or before `next_id`, or to the top |
+| `add_comment` | |
+| `list_epics` | epics with progress |
+| `velocity` | velocity plus per-iteration history |
+
+Resources: `trackstar://projects/{project}/current` and `…/backlog` return
+the section as JSON for attaching as context. The server's instructions
+explain sections, the workflow and move semantics to the model.
+
+Deliberately absent: delete/restore, epic and member management, anything
+about accounts or tokens. Errors come back as tool errors with the API's
+message (`story 42 not found`, `you have read-only access to this project`),
+so the model can correct itself. Each tool call is one HTTP request with no
+server-side session: nothing to keep alive through the tunnel, nothing lost
+on a restart, and a revoked token stops the agent on its next call.
+
 ## Resource usage
 
 Measured on the first working build (linux/amd64, Go 1.27, 13 MB binary),
@@ -543,6 +585,10 @@ the stream replaces the old 60 s poll, idle load is lower than before.
 
 Targets were < 64 MB idle, < 128 MB typical. Most of the footprint is the Go
 runtime plus the pure-Go SQLite engine; the page cache is capped at 8 MB.
+
+The MCP server adds 2 MB to the binary (13.3 → 15.4 MB) and nothing at idle:
+the tool table is built once at startup, and a stateless tool call is one
+HTTP request that costs the same as the equivalent API call.
 
 ## Troubleshooting
 
