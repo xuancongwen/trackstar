@@ -12,6 +12,9 @@ import (
 type Querier interface {
 	AddStoryBlocker(ctx context.Context, arg AddStoryBlockerParams) error
 	AddStoryLabel(ctx context.Context, arg AddStoryLabelParams) error
+	// Turning bug and chore points off drops the points they already have, so
+	// the board and velocity never see points the project does not allow.
+	ClearNonFeatureEstimates(ctx context.Context, arg ClearNonFeatureEstimatesParams) (int64, error)
 	ClearStoryBlockers(ctx context.Context, storyID int64) error
 	ClearStoryLabels(ctx context.Context, storyID int64) error
 	CountActiveAdmins(ctx context.Context) (int64, error)
@@ -88,6 +91,7 @@ type Querier interface {
 	// identical between SQLite and PostgreSQL. sqlc's SQLite parser has no ESCAPE
 	// support, so % and _ typed by a user simply act as wildcards.
 	SearchStories(ctx context.Context, arg SearchStoriesParams) ([]Story, error)
+	SetProjectArchived(ctx context.Context, arg SetProjectArchivedParams) (Project, error)
 	SetStoryDeleted(ctx context.Context, arg SetStoryDeletedParams) error
 	SetStoryPosition(ctx context.Context, arg SetStoryPositionParams) error
 	TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error

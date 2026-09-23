@@ -141,12 +141,17 @@ describe('projectBacklog', () => {
       makeStory({ title: 'Small', estimate: 1 }),
       makeStory({ title: 'Huge', estimate: 8 }),
       makeStory({ title: 'Bug', type: 'bug', estimate: null }),
-      makeStory({ title: 'Chore', type: 'chore', estimate: 3 }),
+      makeStory({ title: 'Chore', type: 'chore', estimate: null }),
       makeStory({ title: 'Next', estimate: 2 }),
     ]
     expect(describeRows(projectBacklog(backlog, 5, current, 7))).toEqual([
       '#13(1)', 'Small', '#14(8)', 'Huge', 'Bug', 'Chore', '#15(2)', 'Next',
     ])
+  })
+
+  it('counts points on bugs and chores when the project gave them some', () => {
+    const backlog = [makeStory({ title: 'Bug', type: 'bug', estimate: 3 }), makeStory({ title: 'Chore', type: 'chore', estimate: 3 })]
+    expect(describeRows(projectBacklog(backlog, 5, current, 7))).toEqual(['#13(3)', 'Bug', '#14(3)', 'Chore'])
   })
 
   it('returns nothing for an empty backlog and survives zero velocity', () => {

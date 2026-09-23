@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"testing"
+	"time"
 
 	"trackstar/internal/apperr"
 	"trackstar/internal/database"
@@ -45,6 +46,11 @@ func TestUpdateIsPartialAndValidated(t *testing.T) {
 	}
 	if got.Name != "Apollo" || got.IterationLengthDays != 14 || got.VelocityWindow != 5 || got.Slug != p.Slug {
 		t.Fatalf("unexpected project: %+v", got)
+	}
+
+	on := true
+	if got, err = svc.Update(ctx, p.ID, Input{EstimateBugsAndChores: &on}); err != nil || !got.EstimateBugsAndChores || got.VelocityWindow != 5 {
+		t.Fatalf("enabling bug and chore points: %+v, %v", got, err)
 	}
 
 	for _, in := range []Input{
@@ -125,6 +131,57 @@ func TestMembershipAccess(t *testing.T) {
 	}
 	if members, _ := svc.Members(ctx, p.ID); len(members) != 1 || members[0].Role != RoleOwner {
 		t.Fatalf("members = %+v", members)
+	}
+}
+
+func TestArchiveMakesProjectReadOnly(t *testing.T) {
+	ctx := context.Background()
+	db := database.NewTestDB(t)
+	clock := testutil.NewClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
+	svc := NewService(db, clock.Now)
+	alice := testutil.CreateUser(t, db, "alice@example.com")
+	bob := testutil.CreateUser(t, db, "bob@example.com")
+	p, _ := svc.Create(ctx, alice, Input{Name: ptr("Apollo")})
+	if err := svc.SetMember(ctx, p.ID, bob, RoleMember); err != nil {
+		t.Fatal(err)
+	}
+
+	p, err := svc.SetArchived(ctx, p.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ArchivedAt == nil || !p.ArchivedAt.Equal(clock.Now()) {
+		t.Fatalf("archived_at = %v", p.ArchivedAt)
+	}
+	// Nobody writes; owners and admins still manage (to unarchive or delete).
+	if a, _ := svc.AccessFor(ctx, p.ID, alice, false); !a.Read || a.Write || !a.Manage || !a.Archived {
+		t.Fatalf("owner access = %+v", a)
+	}
+	if a, _ := svc.AccessFor(ctx, p.ID, bob, false); !a.Read || a.Write || a.Manage || !a.Archived {
+		t.Fatalf("member access = %+v", a)
+	}
+	if a, _ := svc.AccessFor(ctx, p.ID, 999, true); !a.Manage || a.Write {
+		t.Fatalf("admin access = %+v", a)
+	}
+	// Archiving again keeps the original time; it still lists.
+	clock.Advance(time.Hour)
+	again, _ := svc.SetArchived(ctx, p.ID, true)
+	if !again.ArchivedAt.Equal(*p.ArchivedAt) {
+		t.Fatalf("re-archiving moved archived_at to %v", again.ArchivedAt)
+	}
+	if visible, _ := svc.ListVisible(ctx, bob, false); len(visible) != 1 || !visible[0].Archived() {
+		t.Fatalf("visible = %+v", visible)
+	}
+
+	p, err = svc.SetArchived(ctx, p.ID, false)
+	if err != nil || p.ArchivedAt != nil {
+		t.Fatalf("unarchive: %v, archived_at = %v", err, p.ArchivedAt)
+	}
+	if a, _ := svc.AccessFor(ctx, p.ID, bob, false); !a.Write || a.Archived {
+		t.Fatalf("member access after unarchive = %+v", a)
+	}
+	if _, err := svc.SetArchived(ctx, 404, true); apperr.KindOf(err) != apperr.KindNotFound {
+		t.Fatalf("missing project: err = %v", err)
 	}
 }
 

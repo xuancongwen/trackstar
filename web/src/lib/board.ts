@@ -1,6 +1,6 @@
 // Pure board logic: grouping, drag/drop rules, workflow actions and the
 // backlog projection. No DOM, no network — everything here is unit tested.
-import type { DropSection, MoveRequest, Story, StoryState } from './types'
+import type { DropSection, MoveRequest, Project, Story, StoryState, StoryType } from './types'
 
 export const ESTIMATES = [0, 1, 2, 3, 5, 8] as const
 
@@ -27,9 +27,17 @@ export function acceptedThisIteration(stories: Story[]): Story[] {
     .sort((a, b) => (a.accepted_at ?? '').localeCompare(b.accepted_at ?? ''))
 }
 
-/** Points that count towards velocity: estimated features only. */
+/**
+ * Points that count towards velocity. The server only lets bugs and chores
+ * carry an estimate when the project allows it, so every estimate counts.
+ */
 export function storyPoints(story: Story): number {
-  return story.type === 'feature' ? (story.estimate ?? 0) : 0
+  return story.estimate ?? 0
+}
+
+/** Whether a story of this type may be given points in the project. */
+export function canEstimate(type: StoryType, project: Pick<Project, 'estimate_bugs_and_chores'> | null): boolean {
+  return type === 'feature' || project?.estimate_bugs_and_chores === true
 }
 
 export function totalPoints(stories: Story[]): number {

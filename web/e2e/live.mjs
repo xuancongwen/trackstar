@@ -12,7 +12,8 @@ try {
   const project = await seed(api)
   await api('PUT', `/api/projects/${project.id}/members/${kim.user.id}`, { role: 'member' }) // sam owns it; kim must be let in
   const A = await openBoard(browser, trackstar.base, sam.cookie, project.slug, errors)
-  const B = await openBoard(browser, trackstar.base, kim.cookie, project.slug, errors)
+  // Own context for B: pages in one context share cookies, so B's session would replace A's.
+  const B = await openBoard(await browser.createBrowserContext(), trackstar.base, kim.cookie, project.slug, errors)
   const sel = async (page, title) => `[data-story-id="${await storyId(page, title)}"]`
 
   async function waitFor(page, section, want, limit = 3000) {

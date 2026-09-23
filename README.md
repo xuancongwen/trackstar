@@ -43,9 +43,11 @@ you land on the board:
   progress (started/finished/delivered/rejected) stays in the current iteration.
 - Each row has the one button that matters next: Start → Finish → Deliver →
   Accept/Reject → Restart. Unestimated features show the point scale
-  (0 1 2 3 5 8) instead of *Start*; bugs and chores may stay unestimated.
+  (0 1 2 3 5 8) instead of *Start*; bugs and chores carry no points unless the
+  project setting *Allow points on bugs and chores* is on, and may always
+  stay unestimated.
 - The backlog is cut into projected iterations using the velocity: the average
-  of accepted **feature** points over the last N completed iterations
+  of accepted points over the last N completed iterations
   (N = 3 by default; 10 is assumed until one iteration has completed).
 - Iterations are automatic: length (1–4 weeks) and start weekday are project
   settings; nothing needs to be "closed".
@@ -73,11 +75,16 @@ you land on the board:
 - **Done** shows an accepted-points-per-iteration chart with the velocity line
   and pages through older iterations.
 - **Members** (Settings): whoever creates a project owns it and adds the
-  others. Owners manage members and settings and may delete the project;
-  members read and write stories; administrators always have access. Projects
-  you are not in are not listed. A project with no members at all (from before
-  ownership existed) stays open to everyone until an administrator adds an
-  owner.
+  others. Owners manage members and settings and may archive or delete the
+  project; members read and write stories; administrators always have access.
+  Projects you are not in are not listed. A project with no members at all
+  (from before ownership existed) stays open to everyone until an
+  administrator adds an owner.
+- **Archive or delete** (Settings, owners and administrators): an archived
+  project stays readable, keeps its history and velocity, and is listed under
+  *Archived*, but nobody can change stories until it is unarchived. Deleting
+  removes the project with all of its stories, epics, comments and history,
+  immediately and for good; type the project's name to confirm.
 - **On a phone** (≤ 900 px) the board shows one panel at a time with a tab
   strip (Icebox · Backlog · Current · Epics · Done · Trash), a full-width
   filter box, a ☰ menu for settings/account, and a floating **+** that creates
@@ -502,7 +509,9 @@ GET    /api/me/tokens     POST /api/me/tokens {name, expires_in_days?} → {…,
 GET    /api/users         PATCH /api/users/:id {display_name, is_admin, is_active}   POST /api/users/:id/password   (admin, session)
 GET    /api/config
 GET    /api/projects      POST /api/projects
-GET    /api/projects/:id  PATCH … DELETE …       (:id may be the numeric id or the slug)
+GET    /api/projects/:id  PATCH … DELETE …       (:id may be the numeric id or the slug; DELETE removes every story with it)
+                          PATCH {name, description, iteration_length_days, iteration_start_weekday, velocity_window, estimate_bugs_and_chores}
+POST   /api/projects/:id/archive     DELETE …    (archive = read-only for everyone; owners and admins)
 GET    /api/projects/:id/stories[?q=text | ?section=done | ?section=deleted]
 POST   /api/projects/:id/stories     {title, type?, estimate?, section?, description?, owner_id?, labels?}
 GET    /api/projects/:id/labels | /iterations | /velocity
@@ -586,7 +595,7 @@ Tools (a project is named by numeric id or slug):
 
 | Tool | What it does |
 |---|---|
-| `list_projects` | projects you can see, with iteration settings |
+| `list_projects` | projects you can see, with iteration settings; `include_archived` adds archived (read-only) ones |
 | `list_users` | ids → names, so `owner_id` can be resolved; includes `me` |
 | `list_stories` | a project's stories in board order; `section` (icebox, backlog, current, done) and `query` filters |
 | `get_story` | one story with comments, tasks and activity |
@@ -675,7 +684,8 @@ HTTP request that costs the same as the equivalent API call.
   balancer would need a shared bus (PostgreSQL `LISTEN/NOTIFY`).
 - Search is a substring match (`%` and `_` act as wildcards); no ranking.
 - Deleted stories are purged 30 days after deletion; there is no archive
-  beyond that.
+  beyond that. Deleting a project is immediate and unrecoverable (archive it
+  instead to keep it readable); restore from a backup if it was a mistake.
 - No attachments, sub-epics, or notifications. Blockers are informational.
 - PostgreSQL is designed for but not implemented.
 - On phones there is no cross-panel drag (use the drawer's Move to) and no

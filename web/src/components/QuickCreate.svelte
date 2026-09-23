@@ -1,13 +1,15 @@
 <script lang="ts">
-  import { ESTIMATES, SECTION_TITLES } from '../lib/board'
-  import type { DropSection, NewStory, StoryType } from '../lib/types'
+  import { ESTIMATES, SECTION_TITLES, canEstimate } from '../lib/board'
+  import type { DropSection, NewStory, Project, StoryType } from '../lib/types'
 
   interface Props {
     section: DropSection
+    /** Decides whether bugs and chores get the point scale. */
+    project?: Pick<Project, 'estimate_bugs_and_chores'> | null
     oncreate: (story: NewStory, keepOpen: boolean) => Promise<void>
     onclose: () => void
   }
-  let { section, oncreate, onclose }: Props = $props()
+  let { section, project = null, oncreate, onclose }: Props = $props()
 
   let title = $state('')
   let type = $state<StoryType>('feature')
@@ -18,13 +20,15 @@
   let busy = $state(false)
   let titleInput: HTMLInputElement
 
+  let pointable = $derived(canEstimate(type, project))
+
   // keepOpen (Shift+Enter or the second button) keeps the dialog for rapid entry.
   async function save(keepOpen: boolean) {
     if (!title.trim() || busy) return
     busy = true
     error = ''
     try {
-      await oncreate({ title, type, estimate, section: target }, keepOpen)
+      await oncreate({ title, type, estimate: pointable ? estimate : null, section: target }, keepOpen)
       title = ''
       titleInput?.focus()
     } catch (err) {
@@ -71,13 +75,15 @@
           <option value={s}>{SECTION_TITLES[s]}</option>
         {/each}
       </select>
-      <span class="estimates" role="group" aria-label="Estimate">
-        {#each ESTIMATES as pts (pts)}
-          <button type="button" class:active={estimate === pts} onclick={() => (estimate = estimate === pts ? null : pts)}>
-            {pts}
-          </button>
-        {/each}
-      </span>
+      {#if pointable}
+        <span class="estimates" role="group" aria-label="Estimate">
+          {#each ESTIMATES as pts (pts)}
+            <button type="button" class:active={estimate === pts} onclick={() => (estimate = estimate === pts ? null : pts)}>
+              {pts}
+            </button>
+          {/each}
+        </span>
+      {/if}
     </div>
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     <div class="row-actions">

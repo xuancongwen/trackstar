@@ -58,7 +58,8 @@ priority. A move names a neighbour (prev_id or next_id) in the target
 section, or neither to put the story at the top. Started or later stories
 stay in the current section; accepted stories cannot be moved.
 
-Types are feature, bug and chore. Only features carry an estimate (points).
+Types are feature, bug and chore. Features carry an estimate (points); bugs
+and chores only in projects with estimate_bugs_and_chores enabled.
 Labels are free text; an epic is a label with a description and progress.
 Projects can be named by numeric id or by slug. Users are referenced by id;
 list_users maps ids to names. Every change is recorded in the story's
@@ -126,7 +127,8 @@ func (s *server) fail(err error) error {
 }
 
 // authorize mirrors the API's rule: no read access reads as "not found" so a
-// project's existence is not disclosed; write on a viewer role is forbidden.
+// project's existence is not disclosed; writing to an archived project is
+// forbidden.
 func (s *server) authorize(ctx context.Context, projectID int64, write bool) error {
 	u, err := userFrom(ctx)
 	if err != nil {
@@ -138,6 +140,9 @@ func (s *server) authorize(ctx context.Context, projectID int64, write bool) err
 	}
 	if !access.Read {
 		return apperr.NotFound("project")
+	}
+	if write && access.Archived {
+		return apperr.Forbidden("this project is archived; unarchive it to make changes")
 	}
 	if write && !access.Write {
 		return apperr.Forbidden("you have read-only access to this project")

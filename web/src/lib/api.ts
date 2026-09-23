@@ -72,6 +72,8 @@ export const api = {
   createProject: (input: Partial<Project>) => request<Project>('POST', '/api/projects', input),
   updateProject: (id: number, input: Partial<Project>) => request<Project>('PATCH', `/api/projects/${id}`, input),
   deleteProject: (id: number) => request<void>('DELETE', `/api/projects/${id}`),
+  archiveProject: (id: number) => request<Project>('POST', `/api/projects/${id}/archive`),
+  unarchiveProject: (id: number) => request<Project>('DELETE', `/api/projects/${id}/archive`),
 
   stories: (projectId: number, opts: { q?: string; done?: boolean; deleted?: boolean } = {}) => {
     const params = new URLSearchParams()

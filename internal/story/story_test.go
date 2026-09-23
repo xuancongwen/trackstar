@@ -240,6 +240,62 @@ func TestEstimateRules(t *testing.T) {
 	}
 }
 
+func TestBugAndChorePointsNeedTheProjectSetting(t *testing.T) {
+	f := setup(t)
+	actor := story.Actor{ID: f.user}
+	three := int64(3)
+	bug, chore := story.TypeBug, story.TypeChore
+
+	// Off by default: bugs and chores cannot be pointed, by creation or by update.
+	if _, err := f.svc.Create(f.ctx, f.project.ID, f.user, story.CreateInput{Title: "Bug", Type: bug, Estimate: &three}); apperr.KindOf(err) != apperr.KindInvalid {
+		t.Fatalf("pointed bug: err = %v, want invalid", err)
+	}
+	c, err := f.svc.Create(f.ctx, f.project.ID, f.user, story.CreateInput{Title: "Chore", Type: chore})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.Update(f.ctx, c.ID, actor, story.UpdateInput{Estimate: story.Some(three)}); apperr.KindOf(err) != apperr.KindInvalid {
+		t.Fatalf("pointing a chore: err = %v, want invalid", err)
+	}
+	// A pointed feature that becomes a bug loses its points, and says so.
+	ft := f.create(t, "Feature", story.SectionBacklog, 5)
+	got, err := f.svc.Update(f.ctx, ft.ID, actor, story.UpdateInput{Type: &bug})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Estimate != nil {
+		t.Fatalf("estimate after turning into a bug = %d, want none", *got.Estimate)
+	}
+	d, err := f.svc.Get(f.ctx, ft.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cleared bool
+	for _, a := range d.Activity {
+		cleared = cleared || (a.Kind == "estimate" && a.OldValue == "5" && a.NewValue == "")
+	}
+	if !cleared {
+		t.Fatalf("no activity for the dropped estimate: %+v", d.Activity)
+	}
+
+	// With the setting on, they behave like features, except that they may
+	// still start unestimated.
+	on := true
+	if _, err := project.NewService(f.store, f.clock.Now).Update(f.ctx, f.project.ID, project.Input{EstimateBugsAndChores: &on}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.Create(f.ctx, f.project.ID, f.user, story.CreateInput{Title: "Bug", Type: bug, Estimate: &three}); err != nil {
+		t.Fatalf("pointed bug with the setting on: %v", err)
+	}
+	if _, err := f.svc.Update(f.ctx, c.ID, actor, story.UpdateInput{Estimate: story.Some(three)}); err != nil {
+		t.Fatalf("pointing a chore with the setting on: %v", err)
+	}
+	started := story.StateStarted
+	if _, err := f.svc.Update(f.ctx, got.ID, actor, story.UpdateInput{State: &started}); err != nil {
+		t.Fatalf("starting an unestimated bug with the setting on: %v", err)
+	}
+}
+
 func TestReorderWithinSection(t *testing.T) {
 	f := setup(t)
 	a := f.create(t, "A", story.SectionBacklog, 1)

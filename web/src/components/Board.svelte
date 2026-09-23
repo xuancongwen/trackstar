@@ -94,6 +94,7 @@
   let users = $derived(new Map(userList.map((u) => [u.id, u])))
   let currentIteration = $derived(iterations.find((it) => it.current) ?? null)
   let readOnly = $derived(project?.can_write === false)
+  let archived = $derived(project?.archived_at != null)
   let canManage = $derived(project?.can_manage === true)
   let epicNames = $derived(new Set(epics.map((e) => e.name)))
   // The active filter: typed query plus the selected epic, evaluated locally.
@@ -150,9 +151,16 @@
     if (showTrash) trashStories = await api.stories(project.id, { deleted: true })
   }
 
+  // Also re-reads the project itself so settings and the archived state
+  // changed by someone else (a "project" event) show up without a reload.
   async function loadMeta() {
     if (!project) return
-    ;[velocity, iterations, epics] = await Promise.all([api.velocity(project.id), api.iterations(project.id), api.epics(project.id)])
+    ;[velocity, iterations, epics, project] = await Promise.all([
+      api.velocity(project.id),
+      api.iterations(project.id),
+      api.epics(project.id),
+      api.project(project.id),
+    ])
   }
   async function loadEpics() {
     if (project) epics = await api.epics(project.id).catch((err) => (fail(err), epics))
@@ -162,7 +170,9 @@
     try {
       await Promise.all([loadStories(), loadMeta()])
     } catch (err) {
-      fail(err)
+      // The project vanished under us (deleted, or we were removed from it).
+      if (err instanceof ApiError && err.status === 404) loadError = 'This project is no longer available'
+      else fail(err)
     }
   }
 
@@ -559,7 +569,7 @@
             {#if allProjects === null}
               <span class="muted">Loading…</span>
             {:else}
-              {#each allProjects as p (p.id)}
+              {#each allProjects.filter((p) => !p.archived_at || p.id === project?.id) as p (p.id)}
                 <button role="option" aria-selected={p.id === project.id} class:current={p.id === project.id} onclick={() => switchTo(p)}>
                   {p.name}
                 </button>
@@ -593,7 +603,11 @@
       {#if checked.size > 0}
         <span class="chip selection" title="Shift+I / B / C moves the selection; Esc clears">{checked.size} selected</span>
       {/if}
-      {#if readOnly}<span class="chip">read-only</span>{/if}
+      {#if archived}
+        <span class="chip" title="Archived: nobody can change stories until an owner unarchives it in Settings">archived</span>
+      {:else if readOnly}
+        <span class="chip">read-only</span>
+      {/if}
       <span class="spacer"></span>
       <span
         class="live {liveStatus}"
@@ -720,6 +734,7 @@
       me={user}
       {stories}
       {readOnly}
+      {project}
       onmove={moveToSection}
       onpatch={patchStory}
       ondelete={deleteStory}
@@ -729,7 +744,7 @@
     />
   {/if}
   {#if creating}
-    <QuickCreate section={creating} oncreate={createStory} onclose={() => (creating = null)} />
+    <QuickCreate section={creating} {project} oncreate={createStory} onclose={() => (creating = null)} />
   {/if}
   {#if showSettings}
     <ProjectSettings
@@ -743,6 +758,10 @@
         project = p
         showSettings = false
         refresh()
+      }}
+      ondeleted={() => {
+        showSettings = false
+        location.hash = '#/'
       }}
     />
   {/if}

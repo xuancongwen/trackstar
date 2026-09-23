@@ -13,7 +13,6 @@ import (
 	"trackstar/internal/database/dbgen"
 	"trackstar/internal/iteration"
 	"trackstar/internal/project"
-	"trackstar/internal/story"
 )
 
 // DefaultVelocity is assumed until a project has completed an iteration, so
@@ -56,7 +55,7 @@ func NewService(store database.Store, loc *time.Location, now func() time.Time) 
 	return &Service{store: store, loc: loc, now: now}
 }
 
-// Velocity averages accepted feature points over the last N completed
+// Velocity averages accepted points over the last N completed
 // iterations (N = the project's velocity window). A young project with fewer
 // than N completed iterations is averaged over the ones it has.
 func (s *Service) Velocity(ctx context.Context, projectID int64) (Result, error) {
@@ -116,8 +115,9 @@ func (s *Service) Iterations(ctx context.Context, projectID int64) ([]IterationS
 
 type bucket struct{ points, stories int }
 
-// buckets groups stories accepted in [from, to) by iteration number. Only
-// features contribute points; bugs and chores are counted as stories.
+// buckets groups stories accepted in [from, to) by iteration number. Every
+// estimate counts: features always carry one, bugs and chores only in
+// projects that allow it (Project.EstimateBugsAndChores).
 func (s *Service) buckets(ctx context.Context, projectID int64, sched iteration.Schedule, from, to time.Time) (map[int]bucket, error) {
 	rows, err := s.store.ListAcceptedStories(ctx, dbgen.ListAcceptedStoriesParams{
 		ProjectID:      projectID,
@@ -132,7 +132,7 @@ func (s *Service) buckets(ctx context.Context, projectID int64, sched iteration.
 		n := sched.At(time.Unix(r.AcceptedAt.Int64, 0)).Number
 		b := out[n]
 		b.stories++
-		if story.Type(r.Type) == story.TypeFeature && r.Estimate.Valid {
+		if r.Estimate.Valid {
 			b.points += int(r.Estimate.Int64)
 		}
 		out[n] = b

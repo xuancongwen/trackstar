@@ -7,6 +7,8 @@
   let { user, onlogout }: { user: User; onlogout: () => void } = $props()
 
   let projects = $state<Project[]>([])
+  let active = $derived(projects.filter((p) => !p.archived_at))
+  let archived = $derived(projects.filter((p) => p.archived_at))
   let loaded = $state(false)
   let name = $state('')
   let error = $state('')
@@ -43,9 +45,11 @@
   <h1>Projects</h1>
   {#if loaded && projects.length === 0}
     <p class="muted">No projects yet. Create the first one below.</p>
+  {:else if loaded && active.length === 0}
+    <p class="muted">No active projects. Create one below, or unarchive one from its settings.</p>
   {/if}
   <ul>
-    {#each projects as p (p.id)}
+    {#each active as p (p.id)}
       <li>
         <a href={`#/p/${p.slug}`}>
           <strong>{p.name}</strong>
@@ -56,6 +60,21 @@
       </li>
     {/each}
   </ul>
+  {#if archived.length > 0}
+    <details class="archived">
+      <summary>Archived ({archived.length})</summary>
+      <ul>
+        {#each archived as p (p.id)}
+          <li>
+            <a href={`#/p/${p.slug}`}>
+              <strong>{p.name}</strong>
+              <span class="muted">read-only</span>
+            </a>
+          </li>
+        {/each}
+      </ul>
+    </details>
+  {/if}
 
   <form onsubmit={create}>
     <input bind:value={name} placeholder="New project name" required maxlength="100" />
@@ -107,6 +126,18 @@
   }
   li a:hover {
     background: var(--row-hover);
+  }
+  details.archived {
+    margin-top: 16px;
+  }
+  details.archived summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  details.archived a {
+    opacity: 0.75;
   }
   form {
     display: flex;

@@ -14,7 +14,7 @@ type level int
 const (
 	readAccess   level = iota // members (and everyone, on an open project)
 	writeAccess               // same, plus changing stories
-	manageAccess              // owners and administrators: members, settings, deletion
+	manageAccess              // owners and administrators: members, settings, archiving, deletion
 )
 
 // authorize checks the caller's access to a project. A project the caller may
@@ -29,10 +29,12 @@ func (s *Server) authorize(ctx context.Context, projectID int64, need level) err
 	switch {
 	case !access.Read:
 		return apperr.NotFound("project")
-	case need >= writeAccess && !access.Write:
-		return apperr.Forbidden("you have read-only access to this project")
-	case need >= manageAccess && !access.Manage:
+	case need == manageAccess && !access.Manage:
 		return apperr.Forbidden("only a project owner or an administrator can do this")
+	case need == writeAccess && access.Archived: // managing (unarchiving) stays allowed
+		return apperr.Forbidden("this project is archived; unarchive it to make changes")
+	case need == writeAccess && !access.Write:
+		return apperr.Forbidden("you have read-only access to this project")
 	}
 	return nil
 }

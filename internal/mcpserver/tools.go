@@ -59,7 +59,7 @@ func tool[In, Out any](srv *mcp.Server, t *mcp.Tool, h mcp.ToolHandlerFor[In, Ou
 }
 
 func (s *server) addTools(srv *mcp.Server) {
-	tool(srv, &mcp.Tool{Name: "list_projects", Description: "List the projects you can see, with their iteration settings.", Annotations: readOnly}, s.listProjects)
+	tool(srv, &mcp.Tool{Name: "list_projects", Description: "List the projects you can see, with their iteration settings. Archived projects (read-only, archived_at set) are left out unless include_archived is true.", Annotations: readOnly}, s.listProjects)
 	tool(srv, &mcp.Tool{Name: "list_users", Description: "List user accounts (id, name, email) so owner_id and requester_id can be resolved to people.", Annotations: readOnly}, s.listUsers)
 	tool(srv, &mcp.Tool{Name: "list_stories", Description: "List a project's stories in board order, optionally one section only or matching a search. Live stories (icebox, backlog, current) come back together unless section is given; section \"done\" returns stories accepted in earlier iterations.", Annotations: readOnly}, s.listStories)
 	tool(srv, &mcp.Tool{Name: "get_story", Description: "Get one story with its comments, tasks and activity history.", Annotations: readOnly}, s.getStory)
@@ -73,11 +73,15 @@ func (s *server) addTools(srv *mcp.Server) {
 
 // --- projects and users ----------------------------------------------------------------
 
+type listProjectsIn struct {
+	IncludeArchived bool `json:"include_archived,omitempty" jsonschema:"also list archived (read-only) projects"`
+}
+
 type projectsOut struct {
 	Projects []project.Project `json:"projects"`
 }
 
-func (s *server) listProjects(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, projectsOut, error) {
+func (s *server) listProjects(ctx context.Context, _ *mcp.CallToolRequest, in listProjectsIn) (*mcp.CallToolResult, projectsOut, error) {
 	u, err := userFrom(ctx)
 	if err != nil {
 		return nil, projectsOut{}, err
@@ -85,6 +89,15 @@ func (s *server) listProjects(ctx context.Context, _ *mcp.CallToolRequest, _ str
 	projects, err := s.deps.Projects.ListVisible(ctx, u.ID, u.IsAdmin)
 	if err != nil {
 		return nil, projectsOut{}, s.fail(err)
+	}
+	if !in.IncludeArchived {
+		active := projects[:0]
+		for _, p := range projects {
+			if !p.Archived() {
+				active = append(active, p)
+			}
+		}
+		projects = active
 	}
 	return nil, projectsOut{Projects: projects}, nil
 }
@@ -174,7 +187,7 @@ type createStoryIn struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description,omitempty"`
 	Type        string   `json:"type,omitempty" jsonschema:"feature (default), bug or chore"`
-	Estimate    *int64   `json:"estimate,omitempty" jsonschema:"points; features only"`
+	Estimate    *int64   `json:"estimate,omitempty" jsonschema:"points; features only, unless the project's estimate_bugs_and_chores is on"`
 	Section     string   `json:"section,omitempty" jsonschema:"icebox (default), backlog or current"`
 	OwnerID     *int64   `json:"owner_id,omitempty"`
 	Labels      []string `json:"labels,omitempty"`

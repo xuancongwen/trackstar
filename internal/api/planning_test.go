@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"trackstar/internal/project"
@@ -163,4 +164,85 @@ func TestMembershipIsEnforced(t *testing.T) {
 	alice.must(http.StatusForbidden, "PUT", path+"/members/2", map[string]any{"role": "owner"}, nil)
 	admin.must(http.StatusOK, "PUT", path+"/members/2", map[string]any{"role": "owner"}, &members)
 	bob.must(http.StatusNotFound, "GET", path, nil, nil)
+}
+
+func TestArchiveAndDeleteProject(t *testing.T) {
+	_, ts := newServer(t, true)
+	admin := newClient(t, ts)
+	admin.register("admin@example.com")
+	alice := newClient(t, ts)
+	alice.register("alice@example.com") // id 2
+	bob := newClient(t, ts)
+	bob.register("bob@example.com") // id 3
+
+	var p project.Project
+	alice.must(http.StatusCreated, "POST", "/api/projects", map[string]any{"name": "Apollo"}, &p)
+	alice.must(http.StatusOK, "PUT", "/api/projects/1/members/3", map[string]any{"role": "member"}, nil)
+	var st story.Story
+	alice.must(http.StatusCreated, "POST", "/api/projects/1/stories", map[string]any{"title": "S", "section": "backlog"}, &st)
+	alice.must(http.StatusCreated, "POST", "/api/stories/1/comments", map[string]any{"body": "hi"}, nil)
+	alice.must(http.StatusCreated, "POST", "/api/projects/1/epics", map[string]any{"name": "E"}, nil)
+	if p.ArchivedAt != nil {
+		t.Fatalf("new project archived: %+v", p)
+	}
+
+	// Members cannot archive; owners can. Archiving is idempotent.
+	bob.must(http.StatusForbidden, "POST", "/api/projects/1/archive", nil, nil)
+	var view struct {
+		project.Project
+		CanWrite  bool `json:"can_write"`
+		CanManage bool `json:"can_manage"`
+	}
+	alice.must(http.StatusOK, "POST", "/api/projects/1/archive", nil, &view)
+	if view.ArchivedAt == nil || view.CanWrite || !view.CanManage {
+		t.Fatalf("archived view = %+v", view)
+	}
+	alice.must(http.StatusOK, "POST", "/api/projects/1/archive", nil, &view)
+
+	// Read-only for everyone, admins included; reads keep working.
+	for _, c := range []*client{alice, bob, admin} {
+		c.must(http.StatusOK, "GET", "/api/projects/apollo/stories", nil, nil)
+		c.must(http.StatusOK, "GET", "/api/stories/1", nil, nil)
+		c.must(http.StatusForbidden, "POST", "/api/projects/1/stories", map[string]any{"title": "no"}, nil)
+		c.must(http.StatusForbidden, "PATCH", "/api/stories/1", map[string]any{"title": "no"}, nil)
+		c.must(http.StatusForbidden, "DELETE", "/api/stories/1", nil, nil)
+		c.must(http.StatusForbidden, "POST", "/api/stories/1/comments", map[string]any{"body": "no"}, nil)
+		c.must(http.StatusForbidden, "POST", "/api/projects/1/epics", map[string]any{"name": "no"}, nil)
+		c.must(http.StatusForbidden, "POST", "/api/stories/move", map[string]any{"ids": []int64{1}, "section": "current"}, nil)
+	}
+	var msg map[string]string
+	bob.do("PATCH", "/api/stories/1", map[string]any{"title": "no"}, &msg)
+	if !strings.Contains(msg["error"], "archived") {
+		t.Fatalf("error = %q, want to mention archiving", msg["error"])
+	}
+	bob.must(http.StatusOK, "GET", "/api/projects/1", nil, &view)
+	if view.CanWrite || view.CanManage || view.ArchivedAt == nil {
+		t.Fatalf("member's archived view = %+v", view)
+	}
+	// Owners still manage: members, settings, and the archive itself.
+	alice.must(http.StatusOK, "PATCH", "/api/projects/1", map[string]any{"description": "shelved"}, nil)
+	alice.must(http.StatusOK, "PUT", "/api/projects/1/members/3", map[string]any{"role": "owner"}, nil)
+	var list []project.Project
+	bob.must(http.StatusOK, "GET", "/api/projects", nil, &list)
+	if len(list) != 1 || list[0].ArchivedAt == nil {
+		t.Fatalf("list = %+v", list)
+	}
+
+	alice.must(http.StatusOK, "DELETE", "/api/projects/1/archive", nil, &view)
+	if view.ArchivedAt != nil || !view.CanWrite {
+		t.Fatalf("unarchived view = %+v", view)
+	}
+	bob.must(http.StatusOK, "PATCH", "/api/stories/1", map[string]any{"title": "yes"}, nil)
+
+	// Deleting removes the project and everything in it.
+	alice.must(http.StatusNoContent, "DELETE", "/api/projects/1", nil, nil)
+	alice.must(http.StatusNotFound, "GET", "/api/projects/1", nil, nil)
+	alice.must(http.StatusNotFound, "GET", "/api/projects/apollo", nil, nil)
+	admin.must(http.StatusNotFound, "GET", "/api/stories/1", nil, nil)
+	admin.must(http.StatusNotFound, "GET", "/api/projects/1/members", nil, nil)
+	admin.must(http.StatusOK, "GET", "/api/projects", nil, &list)
+	if len(list) != 0 {
+		t.Fatalf("projects after delete = %+v", list)
+	}
+	alice.must(http.StatusNotFound, "DELETE", "/api/projects/1", nil, nil)
 }

@@ -7,14 +7,37 @@ package dbgen
 
 import (
 	"context"
+	"database/sql"
 )
+
+const clearNonFeatureEstimates = `-- name: ClearNonFeatureEstimates :execrows
+UPDATE stories
+SET estimate = NULL, updated_at = ?1
+WHERE project_id = ?2 AND type <> 'feature' AND estimate IS NOT NULL
+`
+
+type ClearNonFeatureEstimatesParams struct {
+	Now       int64
+	ProjectID int64
+}
+
+// Turning bug and chore points off drops the points they already have, so
+// the board and velocity never see points the project does not allow.
+func (q *Queries) ClearNonFeatureEstimates(ctx context.Context, arg ClearNonFeatureEstimatesParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, clearNonFeatureEstimates, arg.Now, arg.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
 
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (name, description, slug, iteration_length_days, iteration_start_weekday,
-                      velocity_window, created_at, updated_at)
+                      velocity_window, estimate_bugs_and_chores, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4,
-        ?5, ?6, ?7, ?7)
-RETURNING id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at
+        ?5, ?6, ?7,
+        ?8, ?8)
+RETURNING id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores
 `
 
 type CreateProjectParams struct {
@@ -24,6 +47,7 @@ type CreateProjectParams struct {
 	IterationLengthDays   int64
 	IterationStartWeekday int64
 	VelocityWindow        int64
+	EstimateBugsAndChores bool
 	Now                   int64
 }
 
@@ -35,6 +59,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.IterationLengthDays,
 		arg.IterationStartWeekday,
 		arg.VelocityWindow,
+		arg.EstimateBugsAndChores,
 		arg.Now,
 	)
 	var i Project
@@ -48,6 +73,8 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.VelocityWindow,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ArchivedAt,
+		&i.EstimateBugsAndChores,
 	)
 	return i, err
 }
@@ -62,7 +89,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id int64) error {
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at FROM projects WHERE id = ?1
+SELECT id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores FROM projects WHERE id = ?1
 `
 
 func (q *Queries) GetProject(ctx context.Context, id int64) (Project, error) {
@@ -78,12 +105,14 @@ func (q *Queries) GetProject(ctx context.Context, id int64) (Project, error) {
 		&i.VelocityWindow,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ArchivedAt,
+		&i.EstimateBugsAndChores,
 	)
 	return i, err
 }
 
 const getProjectBySlug = `-- name: GetProjectBySlug :one
-SELECT id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at FROM projects WHERE slug = ?1
+SELECT id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores FROM projects WHERE slug = ?1
 `
 
 func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, error) {
@@ -99,12 +128,14 @@ func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, e
 		&i.VelocityWindow,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ArchivedAt,
+		&i.EstimateBugsAndChores,
 	)
 	return i, err
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at FROM projects ORDER BY name, id
+SELECT id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores FROM projects ORDER BY name, id
 `
 
 func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
@@ -126,6 +157,8 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 			&i.VelocityWindow,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ArchivedAt,
+			&i.EstimateBugsAndChores,
 		); err != nil {
 			return nil, err
 		}
@@ -140,6 +173,39 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 	return items, nil
 }
 
+const setProjectArchived = `-- name: SetProjectArchived :one
+UPDATE projects
+SET archived_at = ?1,
+    updated_at = ?2
+WHERE id = ?3
+RETURNING id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores
+`
+
+type SetProjectArchivedParams struct {
+	ArchivedAt sql.NullInt64
+	Now        int64
+	ID         int64
+}
+
+func (q *Queries) SetProjectArchived(ctx context.Context, arg SetProjectArchivedParams) (Project, error) {
+	row := q.db.QueryRowContext(ctx, setProjectArchived, arg.ArchivedAt, arg.Now, arg.ID)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Slug,
+		&i.IterationLengthDays,
+		&i.IterationStartWeekday,
+		&i.VelocityWindow,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ArchivedAt,
+		&i.EstimateBugsAndChores,
+	)
+	return i, err
+}
+
 const updateProject = `-- name: UpdateProject :one
 UPDATE projects
 SET name = ?1,
@@ -147,9 +213,10 @@ SET name = ?1,
     iteration_length_days = ?3,
     iteration_start_weekday = ?4,
     velocity_window = ?5,
-    updated_at = ?6
-WHERE id = ?7
-RETURNING id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at
+    estimate_bugs_and_chores = ?6,
+    updated_at = ?7
+WHERE id = ?8
+RETURNING id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores
 `
 
 type UpdateProjectParams struct {
@@ -158,6 +225,7 @@ type UpdateProjectParams struct {
 	IterationLengthDays   int64
 	IterationStartWeekday int64
 	VelocityWindow        int64
+	EstimateBugsAndChores bool
 	Now                   int64
 	ID                    int64
 }
@@ -169,6 +237,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.IterationLengthDays,
 		arg.IterationStartWeekday,
 		arg.VelocityWindow,
+		arg.EstimateBugsAndChores,
 		arg.Now,
 		arg.ID,
 	)
@@ -183,6 +252,8 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.VelocityWindow,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ArchivedAt,
+		&i.EstimateBugsAndChores,
 	)
 	return i, err
 }

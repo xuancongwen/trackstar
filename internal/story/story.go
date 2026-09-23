@@ -165,8 +165,12 @@ func (s *Service) Create(ctx context.Context, projectID, actorID int64, in Creat
 
 	var out Story
 	err := s.store.InTx(ctx, func(q dbgen.Querier) error {
-		if _, err := q.GetProject(ctx, projectID); err != nil {
+		p, err := q.GetProject(ctx, projectID)
+		if err != nil {
 			return notFound(err, "project")
+		}
+		if in.Estimate != nil && in.Type != TypeFeature && !p.EstimateBugsAndChores {
+			return errNoBugChorePoints
 		}
 		if err := requireUser(ctx, q, in.OwnerID, "owner"); err != nil {
 			return err
@@ -204,6 +208,10 @@ func (s *Service) Create(ctx context.Context, projectID, actorID int64, in Creat
 	})
 	return out, err
 }
+
+// errNoBugChorePoints is the answer to points on a bug or chore in a project
+// that has not enabled them (Project.EstimateBugsAndChores).
+var errNoBugChorePoints = apperr.Invalid("bugs and chores cannot have points in this project; a project owner can allow them in the project settings")
 
 func (s *Service) Get(ctx context.Context, id int64) (Detail, error) {
 	row, err := s.store.GetStory(ctx, id)
@@ -423,6 +431,21 @@ func (s *Service) Update(ctx context.Context, id int64, actor Actor, in UpdateIn
 
 		if Type(row.Type) == TypeFeature && !row.Estimate.Valid && (inProgress(State(row.State)) || State(row.State) == StateAccepted) {
 			return apperr.Invalid("a feature needs an estimate before it can be started")
+		}
+		if Type(row.Type) != TypeFeature && row.Estimate.Valid {
+			p, err := q.GetProject(ctx, row.ProjectID)
+			if err != nil {
+				return err
+			}
+			if !p.EstimateBugsAndChores {
+				if in.Estimate.Set && in.Estimate.Value != nil {
+					return errNoBugChorePoints
+				}
+				// The estimate came along with a feature that just became a
+				// bug or chore: it has nowhere to go here, so it is dropped.
+				note("estimate", fmtNullInt(row.Estimate), "")
+				row.Estimate = sql.NullInt64{}
+			}
 		}
 
 		if in.Labels != nil {

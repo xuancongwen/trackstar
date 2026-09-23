@@ -297,6 +297,27 @@ func TestMembershipIsEnforced(t *testing.T) {
 	if msg := call(t, kim, "list_stories", map[string]any{"project": "private"}, nil); !strings.Contains(msg, "not found") {
 		t.Fatalf("non-member list: %q", msg)
 	}
+
+	// Archived projects are hidden from list_projects unless asked for, still
+	// readable, and refuse writes.
+	if _, err := f.deps.Projects.SetArchived(ctx, open.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	mustCall(t, kim, "list_projects", nil, &projects)
+	if len(projects.Projects) != 0 {
+		t.Fatalf("archived project listed: %+v", projects)
+	}
+	mustCall(t, kim, "list_projects", map[string]any{"include_archived": true}, &projects)
+	if len(projects.Projects) != 1 || projects.Projects[0].ArchivedAt == nil {
+		t.Fatalf("include_archived: %+v", projects)
+	}
+	mustCall(t, kim, "list_stories", map[string]any{"project": "open"}, nil)
+	if msg := call(t, kim, "create_story", map[string]any{"project": "open", "title": "no"}, nil); !strings.Contains(msg, "archived") {
+		t.Fatalf("write to archived project: %q", msg)
+	}
+	if _, err := f.deps.Projects.SetArchived(ctx, open.ID, false); err != nil {
+		t.Fatal(err)
+	}
 	if msg := call(t, kim, "get_story", map[string]any{"id": st.ID}, nil); !strings.Contains(msg, "not found") {
 		t.Fatalf("non-member get: %q", msg)
 	}

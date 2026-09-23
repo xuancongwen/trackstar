@@ -43,9 +43,13 @@ export interface Project {
   iteration_length_days: number
   iteration_start_weekday: number
   velocity_window: number
+  /** Bugs and chores may carry points (and count towards velocity). Off by default. */
+  estimate_bugs_and_chores: boolean
+  /** Set while the project is archived: kept and readable, but nobody can change stories. */
+  archived_at: string | null
   /** Present on GET /api/projects/:id: whether the caller may change things. */
   can_write?: boolean
-  /** Present on GET /api/projects/:id: whether the caller may manage members, settings and deletion. */
+  /** Present on GET /api/projects/:id: whether the caller may manage members, settings, archiving and deletion. */
   can_manage?: boolean
 }
 

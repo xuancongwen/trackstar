@@ -37,6 +37,12 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	s.writeProjectWithAccess(w, r, p)
+}
+
+// writeProjectWithAccess responds with the project plus what the caller may
+// do in it, the shape the board needs to decide what to show.
+func (s *Server) writeProjectWithAccess(w http.ResponseWriter, r *http.Request, p project.Project) {
 	u := currentUser(r.Context())
 	access, err := s.Projects.AccessFor(r.Context(), p.ID, u.ID, u.IsAdmin)
 	if err != nil {
@@ -70,6 +76,32 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	s.publish(r, "project", p.ID, 0)
 }
 
+// handleArchiveProject (POST …/archive) and handleUnarchiveProject (DELETE
+// …/archive) toggle the read-only archived state. Both are idempotent.
+func (s *Server) handleArchiveProject(w http.ResponseWriter, r *http.Request) {
+	s.setArchived(w, r, true)
+}
+
+func (s *Server) handleUnarchiveProject(w http.ResponseWriter, r *http.Request) {
+	s.setArchived(w, r, false)
+}
+
+func (s *Server) setArchived(w http.ResponseWriter, r *http.Request, archived bool) {
+	p, err := s.projectFromPath(r, manageAccess)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	p, err = s.Projects.SetArchived(r.Context(), p.ID, archived)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.writeProjectWithAccess(w, r, p)
+	s.publish(r, "project", p.ID, 0)
+}
+
+// handleDeleteProject removes the project and everything in it, for good.
 func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	p, err := s.projectFromPath(r, manageAccess)
 	if err != nil {
@@ -81,6 +113,7 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+	s.publish(r, "project", p.ID, 0)
 }
 
 func (s *Server) handleListIterations(w http.ResponseWriter, r *http.Request) {

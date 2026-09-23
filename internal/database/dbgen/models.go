@@ -55,6 +55,8 @@ type Project struct {
 	VelocityWindow        int64
 	CreatedAt             int64
 	UpdatedAt             int64
+	ArchivedAt            sql.NullInt64
+	EstimateBugsAndChores bool
 }
 
 type ProjectMember struct {

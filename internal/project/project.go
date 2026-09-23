@@ -3,6 +3,7 @@ package project
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strconv"
 	"strings"
@@ -22,16 +23,25 @@ const (
 )
 
 type Project struct {
-	ID                    int64     `json:"id"`
-	Name                  string    `json:"name"`
-	Description           string    `json:"description"`
-	Slug                  string    `json:"slug"`
-	IterationLengthDays   int64     `json:"iteration_length_days"`
-	IterationStartWeekday int64     `json:"iteration_start_weekday"` // 0 = Sunday … 6 = Saturday
-	VelocityWindow        int64     `json:"velocity_window"`
+	ID                    int64  `json:"id"`
+	Name                  string `json:"name"`
+	Description           string `json:"description"`
+	Slug                  string `json:"slug"`
+	IterationLengthDays   int64  `json:"iteration_length_days"`
+	IterationStartWeekday int64  `json:"iteration_start_weekday"` // 0 = Sunday … 6 = Saturday
+	VelocityWindow        int64  `json:"velocity_window"`
+	// EstimateBugsAndChores lets bugs and chores carry points that count
+	// towards velocity. Off by default: only features are estimated.
+	EstimateBugsAndChores bool      `json:"estimate_bugs_and_chores"`
 	CreatedAt             time.Time `json:"created_at"`
 	UpdatedAt             time.Time `json:"updated_at"`
+	// ArchivedAt is set while the project is archived: kept, listed, but
+	// read-only for everyone until an owner unarchives it.
+	ArchivedAt *time.Time `json:"archived_at"`
 }
+
+// Archived reports whether the project is archived.
+func (p Project) Archived() bool { return p.ArchivedAt != nil }
 
 // Schedule returns the iteration schedule of the project.
 func (p Project) Schedule(loc *time.Location) iteration.Schedule {
@@ -44,7 +54,7 @@ func (p Project) Schedule(loc *time.Location) iteration.Schedule {
 }
 
 func FromRow(r dbgen.Project) Project {
-	return Project{
+	p := Project{
 		ID:                    r.ID,
 		Name:                  r.Name,
 		Description:           r.Description,
@@ -52,9 +62,15 @@ func FromRow(r dbgen.Project) Project {
 		IterationLengthDays:   r.IterationLengthDays,
 		IterationStartWeekday: r.IterationStartWeekday,
 		VelocityWindow:        r.VelocityWindow,
+		EstimateBugsAndChores: r.EstimateBugsAndChores,
 		CreatedAt:             time.Unix(r.CreatedAt, 0).UTC(),
 		UpdatedAt:             time.Unix(r.UpdatedAt, 0).UTC(),
 	}
+	if r.ArchivedAt.Valid {
+		t := time.Unix(r.ArchivedAt.Int64, 0).UTC()
+		p.ArchivedAt = &t
+	}
+	return p
 }
 
 // Input carries create/update fields; nil means "default" on create and
@@ -65,6 +81,7 @@ type Input struct {
 	IterationLengthDays   *int64  `json:"iteration_length_days"`
 	IterationStartWeekday *int64  `json:"iteration_start_weekday"`
 	VelocityWindow        *int64  `json:"velocity_window"`
+	EstimateBugsAndChores *bool   `json:"estimate_bugs_and_chores"`
 }
 
 type Service struct {
@@ -106,6 +123,7 @@ func (s *Service) Create(ctx context.Context, ownerID int64, in Input) (Project,
 			IterationLengthDays:   p.IterationLengthDays,
 			IterationStartWeekday: p.IterationStartWeekday,
 			VelocityWindow:        p.VelocityWindow,
+			EstimateBugsAndChores: p.EstimateBugsAndChores,
 			Now:                   s.now().Unix(),
 		})
 		if err != nil || ownerID == 0 {
@@ -168,9 +186,11 @@ func (s *Service) Update(ctx context.Context, id int64, in Input) (Project, erro
 		if err != nil {
 			return err
 		}
+		wasEstimating := p.EstimateBugsAndChores
 		if err := apply(&p, in); err != nil {
 			return err
 		}
+		now := s.now().Unix()
 		row, err = q.UpdateProject(ctx, dbgen.UpdateProjectParams{
 			ID:                    id,
 			Name:                  p.Name,
@@ -178,8 +198,17 @@ func (s *Service) Update(ctx context.Context, id int64, in Input) (Project, erro
 			IterationLengthDays:   p.IterationLengthDays,
 			IterationStartWeekday: p.IterationStartWeekday,
 			VelocityWindow:        p.VelocityWindow,
-			Now:                   s.now().Unix(),
+			EstimateBugsAndChores: p.EstimateBugsAndChores,
+			Now:                   now,
 		})
+		if err != nil {
+			return err
+		}
+		// Points on bugs and chores exist only while the project allows
+		// them; switching the option off takes them away again.
+		if wasEstimating && !p.EstimateBugsAndChores {
+			_, err = q.ClearNonFeatureEstimates(ctx, dbgen.ClearNonFeatureEstimatesParams{ProjectID: id, Now: now})
+		}
 		return err
 	})
 	if err != nil {
@@ -188,6 +217,34 @@ func (s *Service) Update(ctx context.Context, id int64, in Input) (Project, erro
 	return FromRow(row), nil
 }
 
+// SetArchived archives or unarchives a project. Archiving is idempotent and
+// keeps the original archive time.
+func (s *Service) SetArchived(ctx context.Context, id int64, archived bool) (Project, error) {
+	var row dbgen.Project
+	err := s.store.InTx(ctx, func(q dbgen.Querier) error {
+		p, err := get(ctx, q, id)
+		if err != nil {
+			return err
+		}
+		if p.Archived() == archived {
+			row, err = q.GetProject(ctx, id)
+			return err
+		}
+		at := sql.NullInt64{}
+		if archived {
+			at = sql.NullInt64{Int64: s.now().Unix(), Valid: true}
+		}
+		row, err = q.SetProjectArchived(ctx, dbgen.SetProjectArchivedParams{ID: id, ArchivedAt: at, Now: s.now().Unix()})
+		return err
+	})
+	if err != nil {
+		return Project{}, err
+	}
+	return FromRow(row), nil
+}
+
+// Delete removes the project for good, with every story, comment, label,
+// epic, task, membership and saved filter in it (foreign keys cascade).
 func (s *Service) Delete(ctx context.Context, id int64) error {
 	if _, err := s.Get(ctx, id); err != nil {
 		return err
@@ -210,6 +267,9 @@ func apply(p *Project, in Input) error {
 	}
 	if in.VelocityWindow != nil {
 		p.VelocityWindow = *in.VelocityWindow
+	}
+	if in.EstimateBugsAndChores != nil {
+		p.EstimateBugsAndChores = *in.EstimateBugsAndChores
 	}
 
 	switch {

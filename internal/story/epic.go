@@ -16,7 +16,7 @@ type Epic struct {
 	ProjectID      int64  `json:"project_id"`
 	Name           string `json:"name"`
 	Description    string `json:"description"`
-	TotalPoints    int64  `json:"total_points"`    // estimated feature points, all live stories
+	TotalPoints    int64  `json:"total_points"`    // points of all live stories (bugs and chores only when the project allows it)
 	AcceptedPoints int64  `json:"accepted_points"` // of which accepted
 	StoryCount     int64  `json:"story_count"`
 	AcceptedCount  int64  `json:"accepted_count"`
@@ -59,7 +59,7 @@ func (s *Service) Epics(ctx context.Context, projectID int64) ([]Epic, error) {
 		if accepted {
 			e.AcceptedCount++
 		}
-		if Type(st.Type) == TypeFeature && st.Estimate.Valid {
+		if st.Estimate.Valid {
 			e.TotalPoints += st.Estimate.Int64
 			if accepted {
 				e.AcceptedPoints += st.Estimate.Int64

@@ -11,9 +11,11 @@
     members: Member[]
     onmembers: (members: Member[]) => void
     onsaved: (project: Project) => void
+    /** The project is gone; the caller leaves the board. */
+    ondeleted: () => void
     onclose: () => void
   }
-  let { project, canManage, users, members, onmembers, onsaved, onclose }: Props = $props()
+  let { project, canManage, users, members, onmembers, onsaved, ondeleted, onclose }: Props = $props()
 
   let memberError = $state('')
   const roleOf = (userId: number): Role | '' => members.find((m) => m.user_id === userId)?.role ?? ''
@@ -40,7 +42,10 @@
     iteration_length_days: project.iteration_length_days,
     iteration_start_weekday: project.iteration_start_weekday,
     velocity_window: project.velocity_window,
+    estimate_bugs_and_chores: project.estimate_bugs_and_chores,
   })
+  // Unticking the option removes the points bugs and chores already have.
+  let droppingPoints = $derived(project.estimate_bugs_and_chores && !form.estimate_bugs_and_chores)
   let error = $state('')
 
   async function submit(event: SubmitEvent) {
@@ -50,6 +55,39 @@
       onsaved(await api.updateProject(project.id, form))
     } catch (err) {
       error = (err as Error).message
+    }
+  }
+
+  // Danger zone: archiving flips read-only and is reversible; deleting is
+  // not, so it asks for the project's name first.
+  let dangerError = $state('')
+  let confirmingDelete = $state(false)
+  let confirmName = $state('')
+  let busy = $state(false)
+  let archived = $derived(project.archived_at != null)
+
+  async function toggleArchive() {
+    dangerError = ''
+    busy = true
+    try {
+      onsaved(archived ? await api.unarchiveProject(project.id) : await api.archiveProject(project.id))
+    } catch (err) {
+      dangerError = (err as Error).message
+    } finally {
+      busy = false
+    }
+  }
+
+  async function deleteProject() {
+    if (confirmName.trim() !== project.name) return
+    dangerError = ''
+    busy = true
+    try {
+      await api.deleteProject(project.id)
+      ondeleted()
+    } catch (err) {
+      dangerError = (err as Error).message
+      busy = false
     }
   }
 </script>
@@ -83,6 +121,15 @@
           </select>
         </label>
       </div>
+      <label class="check">
+        <input type="checkbox" bind:checked={form.estimate_bugs_and_chores} />
+        <span>Allow points on bugs and chores</span>
+      </label>
+      <p class="muted">
+        {droppingPoints
+          ? 'Points already on bugs and chores will be removed, and their history recounted.'
+          : 'Off: only features are estimated. On: bugs and chores may carry points too, and they count towards velocity.'}
+      </p>
     </fieldset>
     <p class="muted">
       {canManage
@@ -119,6 +166,41 @@
       </div>
       {#if memberError}<p class="error" role="alert">{memberError}</p>{/if}
     </fieldset>
+    {#if canManage}
+      <fieldset class="danger">
+        <legend>Archive or delete</legend>
+        <div class="danger-row">
+          <p class="muted">
+            {archived
+              ? 'Archived: nobody can change stories. Unarchive to resume work.'
+              : 'Archiving keeps everything readable but stops all changes. It can be undone.'}
+          </p>
+          <button type="button" onclick={toggleArchive} disabled={busy}>{archived ? 'Unarchive' : 'Archive'}</button>
+        </div>
+        <div class="danger-row">
+          <p class="muted">Deleting removes the project and all of its stories, epics, comments and history. This cannot be undone.</p>
+          {#if !confirmingDelete}
+            <button type="button" class="destructive" onclick={() => (confirmingDelete = true)} disabled={busy}>Delete…</button>
+          {/if}
+        </div>
+        {#if confirmingDelete}
+          <div class="confirm">
+            <label class="field">
+              <span>Type <b>{project.name}</b> to confirm</span>
+              <!-- svelte-ignore a11y_autofocus -->
+              <input bind:value={confirmName} autofocus placeholder={project.name} onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), deleteProject())} />
+            </label>
+            <div class="row-actions">
+              <button type="button" onclick={() => ((confirmingDelete = false), (confirmName = ''))}>Keep project</button>
+              <button type="button" class="destructive" onclick={deleteProject} disabled={busy || confirmName.trim() !== project.name}>
+                Delete project
+              </button>
+            </div>
+          </div>
+        {/if}
+        {#if dangerError}<p class="error" role="alert">{dangerError}</p>{/if}
+      </fieldset>
+    {/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     <div class="row-actions">
       <button type="button" onclick={onclose}>{canManage ? 'Cancel' : 'Close'}</button>
@@ -150,6 +232,15 @@
     margin: 0;
     min-width: 0;
   }
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+  }
+  .check input {
+    margin: 0;
+  }
   legend {
     font-size: 11px;
     text-transform: uppercase;
@@ -175,5 +266,29 @@
     align-items: center;
     gap: 8px;
     font-size: 12px;
+  }
+  fieldset.danger {
+    border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+  }
+  .danger-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+  .danger-row button {
+    flex-shrink: 0;
+  }
+  .confirm {
+    display: grid;
+    gap: 6px;
+    padding-top: 4px;
+  }
+  button.destructive {
+    color: var(--danger);
+    border-color: currentColor;
+  }
+  button.destructive:disabled {
+    opacity: 0.5;
   }
 </style>

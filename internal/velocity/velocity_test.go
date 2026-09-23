@@ -13,12 +13,13 @@ import (
 )
 
 type fixture struct {
-	ctx     context.Context
-	clock   *testutil.Clock
-	stories *story.Service
-	svc     *velocity.Service
-	project int64
-	user    int64
+	ctx      context.Context
+	clock    *testutil.Clock
+	stories  *story.Service
+	projects *project.Service
+	svc      *velocity.Service
+	project  int64
+	user     int64
 }
 
 func setup(t *testing.T) *fixture {
@@ -26,24 +27,31 @@ func setup(t *testing.T) *fixture {
 	clock := testutil.NewClock(time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)) // a Monday
 	store := database.NewTestDB(t)
 	name := "Apollo"
-	p, err := project.NewService(store, clock.Now).Create(context.Background(), 0, project.Input{Name: &name})
+	projects := project.NewService(store, clock.Now)
+	p, err := projects.Create(context.Background(), 0, project.Input{Name: &name})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return &fixture{
-		ctx:     context.Background(),
-		clock:   clock,
-		stories: story.NewService(store, time.UTC, clock.Now),
-		svc:     velocity.NewService(store, time.UTC, clock.Now),
-		project: p.ID,
-		user:    testutil.CreateUser(t, store, "sam@example.com"),
+		ctx:      context.Background(),
+		clock:    clock,
+		stories:  story.NewService(store, time.UTC, clock.Now),
+		projects: projects,
+		svc:      velocity.NewService(store, time.UTC, clock.Now),
+		project:  p.ID,
+		user:     testutil.CreateUser(t, store, "sam@example.com"),
 	}
 }
 
-// accept creates a story and walks it through the workflow at the current time.
+// accept creates a story and walks it through the workflow at the current
+// time. A negative points value leaves the story unestimated.
 func (f *fixture) accept(t *testing.T, typ story.Type, points int64) {
 	t.Helper()
-	s, err := f.stories.Create(f.ctx, f.project, f.user, story.CreateInput{Title: "s", Type: typ, Estimate: &points, Section: story.SectionCurrent})
+	in := story.CreateInput{Title: "s", Type: typ, Section: story.SectionCurrent}
+	if points >= 0 {
+		in.Estimate = &points
+	}
+	s, err := f.stories.Create(f.ctx, f.project, f.user, in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +83,7 @@ func TestVelocityAveragesCompletedIterations(t *testing.T) {
 	// Iteration 1: 10 feature points, plus a bug and an unfinished story that must not count.
 	f.accept(t, story.TypeFeature, 5)
 	f.accept(t, story.TypeFeature, 5)
-	f.accept(t, story.TypeBug, 3)
+	f.accept(t, story.TypeBug, -1)
 	five := int64(5)
 	if _, err := f.stories.Create(f.ctx, f.project, f.user, story.CreateInput{Title: "open", Estimate: &five, Section: story.SectionCurrent}); err != nil {
 		t.Fatal(err)
@@ -122,6 +130,35 @@ func TestVelocityAveragesCompletedIterations(t *testing.T) {
 	}
 	if !its[0].StartAt.Equal(time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC)) || !its[0].EndAt.Equal(its[1].StartAt) {
 		t.Fatalf("iteration 1 range = %v – %v", its[0].StartAt, its[0].EndAt)
+	}
+}
+
+func TestBugAndChorePointsCountWhenTheProjectAllowsThem(t *testing.T) {
+	f := setup(t)
+	on := true
+	if _, err := f.projects.Update(f.ctx, f.project, project.Input{EstimateBugsAndChores: &on}); err != nil {
+		t.Fatal(err)
+	}
+	f.accept(t, story.TypeFeature, 5)
+	f.accept(t, story.TypeBug, 3)
+	f.accept(t, story.TypeChore, 2)
+	f.clock.Advance(week)
+
+	got, err := f.svc.Velocity(f.ctx, f.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Velocity != 10 {
+		t.Fatalf("velocity = %d, want 10 (features, bugs and chores)", got.Velocity)
+	}
+
+	// Switching the option off takes the points away again, history included.
+	off := false
+	if _, err := f.projects.Update(f.ctx, f.project, project.Input{EstimateBugsAndChores: &off}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = f.svc.Velocity(f.ctx, f.project); err != nil || got.Velocity != 5 {
+		t.Fatalf("velocity after disabling = %d, %v; want 5", got.Velocity, err)
 	}
 }
 

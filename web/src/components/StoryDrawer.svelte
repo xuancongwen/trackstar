@@ -1,8 +1,8 @@
 <script lang="ts">
   import { api } from '../lib/api'
-  import { ESTIMATES, SECTION_TITLES, canDrop, nextActions } from '../lib/board'
+  import { ESTIMATES, SECTION_TITLES, canDrop, canEstimate, nextActions } from '../lib/board'
   import { formatDayTime } from '../lib/format'
-  import type { Activity, Comment, DropSection, Story, StoryPatch, StoryType, Task, User } from '../lib/types'
+  import type { Activity, Comment, DropSection, Project, Story, StoryPatch, StoryType, Task, User } from '../lib/types'
 
   interface Props {
     story: Story
@@ -11,6 +11,8 @@
     /** All loaded stories, to name blockers and offer them in the picker. */
     stories?: Story[]
     readOnly?: boolean
+    /** Decides whether bugs and chores get the point scale. */
+    project?: Pick<Project, 'estimate_bugs_and_chores'> | null
     onpatch: (id: number, patch: StoryPatch) => Promise<boolean>
     /** Append the story to a section; shown for sections it may move to. */
     onmove?: (id: number, section: DropSection) => void
@@ -19,7 +21,7 @@
     oncommented: (id: number, delta: number) => void
     onclose: () => void
   }
-  let { story, users, me, stories = [], readOnly = false, onmove, onpatch, ondelete, onrestore, oncommented, onclose }: Props = $props()
+  let { story, users, me, stories = [], readOnly = false, project = null, onmove, onpatch, ondelete, onrestore, oncommented, onclose }: Props = $props()
 
   // Text fields are edited locally and saved on blur; they re-sync whenever
   // the story changes underneath (server response, background refresh).
@@ -283,18 +285,20 @@
       </div>
     {/if}
 
-    <div class="field">
-      <span>Estimate</span>
-      <span class="estimates" role="group" aria-label="Estimate">
-        {#each ESTIMATES as pts (pts)}
-          <button
-            class:active={story.estimate === pts}
-            disabled={locked}
-            onclick={() => onpatch(story.id, { estimate: story.estimate === pts ? null : pts })}>{pts}</button
-          >
-        {/each}
-      </span>
-    </div>
+    {#if canEstimate(story.type, project)}
+      <div class="field">
+        <span>Estimate</span>
+        <span class="estimates" role="group" aria-label="Estimate">
+          {#each ESTIMATES as pts (pts)}
+            <button
+              class:active={story.estimate === pts}
+              disabled={locked}
+              onclick={() => onpatch(story.id, { estimate: story.estimate === pts ? null : pts })}>{pts}</button
+            >
+          {/each}
+        </span>
+      </div>
+    {/if}
 
     <label class="field">
       <span>Description</span>

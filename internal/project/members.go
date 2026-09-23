@@ -28,15 +28,34 @@ type Member struct {
 
 // Access is what a user may do in a project.
 type Access struct {
-	Read   bool
-	Write  bool
-	Manage bool // members, settings and deletion
+	Read     bool
+	Write    bool
+	Manage   bool // members, settings, archiving and deletion
+	Archived bool // the project is archived: Write is false for everyone
 }
 
 // AccessFor resolves a user's access. Administrators always have full access;
 // otherwise a project without members is open to all (but managed only by
-// administrators), and with members only they may see it.
+// administrators), and with members only they may see it. An archived project
+// is read-only for everyone, though owners and administrators still manage it
+// (to unarchive or delete it).
 func (s *Service) AccessFor(ctx context.Context, projectID, userID int64, isAdmin bool) (Access, error) {
+	p, err := get(ctx, s.store, projectID)
+	if err != nil {
+		return Access{}, err
+	}
+	a, err := s.membershipAccess(ctx, projectID, userID, isAdmin)
+	if err != nil {
+		return Access{}, err
+	}
+	if p.Archived() {
+		a.Write = false
+		a.Archived = true
+	}
+	return a, nil
+}
+
+func (s *Service) membershipAccess(ctx context.Context, projectID, userID int64, isAdmin bool) (Access, error) {
 	if isAdmin {
 		return Access{Read: true, Write: true, Manage: true}, nil
 	}
