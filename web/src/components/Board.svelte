@@ -94,6 +94,7 @@
   let users = $derived(new Map(userList.map((u) => [u.id, u])))
   let currentIteration = $derived(iterations.find((it) => it.current) ?? null)
   let readOnly = $derived(project?.can_write === false)
+  let canManage = $derived(project?.can_manage === true)
   let epicNames = $derived(new Set(epics.map((e) => e.name)))
   // The active filter: typed query plus the selected epic, evaluated locally.
   let terms = $derived(parseQuery(query + (activeEpic ? ` label:"${activeEpic}"` : '')))
@@ -733,6 +734,7 @@
   {#if showSettings}
     <ProjectSettings
       {project}
+      {canManage}
       users={userList}
       {members}
       onmembers={(m) => (members = m)}

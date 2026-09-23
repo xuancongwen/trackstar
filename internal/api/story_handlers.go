@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Server) handleListStories(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, false)
+	p, err := s.projectFromPath(r, readAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -26,7 +26,7 @@ func (s *Server) handleListStories(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateStory(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, true)
+	p, err := s.projectFromPath(r, writeAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -46,7 +46,7 @@ func (s *Server) handleCreateStory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListLabels(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, false)
+	p, err := s.projectFromPath(r, readAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -60,7 +60,7 @@ func (s *Server) handleListLabels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetStory(w http.ResponseWriter, r *http.Request) {
-	id, err := s.idFromPath(r, "id", false, s.Stories.ProjectOfStory)
+	id, err := s.idFromPath(r, "id", readAccess, s.Stories.ProjectOfStory)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -74,7 +74,7 @@ func (s *Server) handleGetStory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateStory(w http.ResponseWriter, r *http.Request) {
-	id, err := s.idFromPath(r, "id", true, s.Stories.ProjectOfStory)
+	id, err := s.idFromPath(r, "id", writeAccess, s.Stories.ProjectOfStory)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -101,7 +101,7 @@ func (s *Server) handleUpdateStory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteStory(w http.ResponseWriter, r *http.Request) {
-	id, err := s.idFromPath(r, "id", true, s.Stories.ProjectOfStory)
+	id, err := s.idFromPath(r, "id", writeAccess, s.Stories.ProjectOfStory)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -116,7 +116,7 @@ func (s *Server) handleDeleteStory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRestoreStory(w http.ResponseWriter, r *http.Request) {
-	id, err := s.idFromPath(r, "id", true, s.Stories.ProjectOfStory)
+	id, err := s.idFromPath(r, "id", writeAccess, s.Stories.ProjectOfStory)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -131,7 +131,7 @@ func (s *Server) handleRestoreStory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMoveStory(w http.ResponseWriter, r *http.Request) {
-	id, err := s.idFromPath(r, "id", true, s.Stories.ProjectOfStory)
+	id, err := s.idFromPath(r, "id", writeAccess, s.Stories.ProjectOfStory)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -169,7 +169,7 @@ func (s *Server) handleMoveStories(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	if err := s.authorize(r.Context(), projectID, true); err != nil {
+	if err := s.authorize(r.Context(), projectID, writeAccess); err != nil {
 		s.fail(w, r, err)
 		return
 	}
@@ -187,7 +187,7 @@ func (s *Server) handleMoveStories(w http.ResponseWriter, r *http.Request) {
 // --- comments --------------------------------------------------------------------------
 
 func (s *Server) handleCreateComment(w http.ResponseWriter, r *http.Request) {
-	id, err := s.idFromPath(r, "id", true, s.Stories.ProjectOfStory)
+	id, err := s.idFromPath(r, "id", writeAccess, s.Stories.ProjectOfStory)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -211,7 +211,7 @@ func (s *Server) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteComment(w http.ResponseWriter, r *http.Request) {
-	id, err := s.idFromPath(r, "id", true, s.Stories.ProjectOfComment)
+	id, err := s.idFromPath(r, "id", writeAccess, s.Stories.ProjectOfComment)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -230,7 +230,7 @@ func (s *Server) handleDeleteComment(w http.ResponseWriter, r *http.Request) {
 // --- tasks -----------------------------------------------------------------------------
 
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
-	id, err := s.idFromPath(r, "id", true, s.Stories.ProjectOfStory)
+	id, err := s.idFromPath(r, "id", writeAccess, s.Stories.ProjectOfStory)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -254,7 +254,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
-	id, err := s.idFromPath(r, "id", true, s.Stories.ProjectOfTask)
+	id, err := s.idFromPath(r, "id", writeAccess, s.Stories.ProjectOfTask)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -276,7 +276,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
-	id, err := s.idFromPath(r, "id", true, s.Stories.ProjectOfTask)
+	id, err := s.idFromPath(r, "id", writeAccess, s.Stories.ProjectOfTask)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -295,7 +295,7 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 // --- epics -----------------------------------------------------------------------------
 
 func (s *Server) handleListEpics(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, false)
+	p, err := s.projectFromPath(r, readAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -309,7 +309,7 @@ func (s *Server) handleListEpics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateEpic(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, true)
+	p, err := s.projectFromPath(r, writeAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -329,7 +329,7 @@ func (s *Server) handleCreateEpic(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateEpic(w http.ResponseWriter, r *http.Request) {
-	id, err := s.idFromPath(r, "id", true, s.Stories.ProjectOfEpic)
+	id, err := s.idFromPath(r, "id", writeAccess, s.Stories.ProjectOfEpic)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -349,7 +349,7 @@ func (s *Server) handleUpdateEpic(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteEpic(w http.ResponseWriter, r *http.Request) {
-	id, err := s.idFromPath(r, "id", true, s.Stories.ProjectOfEpic)
+	id, err := s.idFromPath(r, "id", writeAccess, s.Stories.ProjectOfEpic)
 	if err != nil {
 		s.fail(w, r, err)
 		return

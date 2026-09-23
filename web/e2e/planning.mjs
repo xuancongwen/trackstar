@@ -1,4 +1,4 @@
-// Milestone 3: epics, tasks, blockers, filters, multi-select, membership.
+// Milestone 3: epics, tasks, blockers, filters, multi-select, membership (owners and members).
 import { apiClient, checker, dragOnto, launchBrowser, login, openBoard, order, seed, sleep, startTrackstar, storyId } from './harness.mjs'
 
 const t = checker()
@@ -100,15 +100,20 @@ try {
   await page.waitForSelector('section[aria-label="Done"]')
   t.eq('iteration chart drawn', (await page.$('section[aria-label="Done"] svg.chart rect.bar')) !== null, true)
 
-  // --- membership: sam member, kim viewer → kim's board is read-only
-  await api('PUT', `/api/projects/${project.id}/members/${sam.user.id}`, { role: 'member' })
-  await api('PUT', `/api/projects/${project.id}/members/${kim.user.id}`, { role: 'viewer' })
+  // --- membership: sam owns the seeded project; kim sees it only once added
+  const kimApi = apiClient(trackstar.base, kim.cookie)
+  t.eq('creator is the owner', (await api('GET', `/api/projects/${project.id}/members`)).map((m) => m.role), ['owner'])
+  t.eq('non-member cannot see the project', await kimApi('GET', `/api/projects/${project.id}`).catch((e) => e.message.includes(' 404 ')), true)
+  await api('PUT', `/api/projects/${project.id}/members/${kim.user.id}`, { role: 'member' })
   const kimPage = await openBoard(browser, trackstar.base, kim.cookie, project.slug, errors)
-  t.eq('viewer sees read-only chip', (await kimPage.$('.chip')) !== null && (await kimPage.$eval('.chip', (e) => e.textContent)) === 'read-only', true)
-  t.eq('viewer has no action buttons on rows', await kimPage.$$eval('[data-story-id] button', (els) => els.length), 0)
-  t.eq('viewer has no + Story', await kimPage.$$eval('header.topbar button', (els) => els.some((b) => b.textContent.includes('+ Story'))), false)
+  t.eq('member has + Story', await kimPage.$$eval('header.topbar button', (els) => els.some((b) => b.textContent.includes('+ Story'))), true)
+  await kimPage.evaluate(() => [...document.querySelectorAll('header.topbar button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+  await kimPage.waitForSelector('form[aria-label="Project settings"]')
+  t.eq('member cannot edit settings', await kimPage.$eval('form[aria-label="Project settings"] input', (e) => e.matches(':disabled')), true)
+  t.eq('member cannot change members', await kimPage.$$eval('form[aria-label="Project settings"] .members select', (els) => els.length), 0)
+  t.eq('member cannot promote', await kimApi('PUT', `/api/projects/${project.id}/members/${kim.user.id}`, { role: 'owner' }).catch((e) => e.message.includes(' 403 ')), true)
+  t.eq('last owner cannot leave', await api('DELETE', `/api/projects/${project.id}/members/${sam.user.id}`).catch((e) => e.message.includes(' 422 ')), true)
   await api('DELETE', `/api/projects/${project.id}/members/${kim.user.id}`)
-  await api('DELETE', `/api/projects/${project.id}/members/${sam.user.id}`)
 } finally {
   await browser.close()
   trackstar.stop()

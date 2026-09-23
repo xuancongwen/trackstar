@@ -8,7 +8,9 @@ const browser = await launchBrowser()
 try {
   const sam = await login(trackstar.base, 'sam@example.com', 'e2e-password-1', 'Sam')
   const kim = await login(trackstar.base, 'kim@example.com', 'e2e-password-1', 'Kim')
-  const project = await seed(apiClient(trackstar.base, sam.cookie))
+  const api = apiClient(trackstar.base, sam.cookie)
+  const project = await seed(api)
+  await api('PUT', `/api/projects/${project.id}/members/${kim.user.id}`, { role: 'member' }) // sam owns it; kim must be let in
   const A = await openBoard(browser, trackstar.base, sam.cookie, project.slug, errors)
   const B = await openBoard(browser, trackstar.base, kim.cookie, project.slug, errors)
   const sel = async (page, title) => `[data-story-id="${await storyId(page, title)}"]`

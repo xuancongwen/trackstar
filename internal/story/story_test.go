@@ -29,7 +29,7 @@ func setup(t *testing.T) *fixture {
 	clock := testutil.NewClock(time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC))
 	store := database.NewTestDB(t)
 	name := "Apollo"
-	p, err := project.NewService(store, clock.Now).Create(context.Background(), project.Input{Name: &name})
+	p, err := project.NewService(store, clock.Now).Create(context.Background(), 0, project.Input{Name: &name})
 	if err != nil {
 		t.Fatal(err)
 	}

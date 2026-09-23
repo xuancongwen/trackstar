@@ -257,7 +257,7 @@ func TestSystemInfoForbiddenForRegularUsers(t *testing.T) {
 	admin := newClient(t, ts)
 	admin.must(http.StatusOK, "POST", "/api/auth/login", map[string]string{"email": "admin@example.com", "password": "correct horse"}, nil)
 	admin.must(http.StatusCreated, "POST", "/api/projects", map[string]any{"name": "Apollo"}, nil)
-	regular.must(http.StatusForbidden, "DELETE", "/api/projects/1", nil, nil)
+	regular.must(http.StatusNotFound, "DELETE", "/api/projects/1", nil, nil) // not a member: hidden
 	admin.must(http.StatusNoContent, "DELETE", "/api/projects/1", nil, nil)
 }
 

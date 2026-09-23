@@ -139,7 +139,7 @@ func TestToolsAreListedWithSchemas(t *testing.T) {
 func TestWorkflowThroughTools(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	p, err := f.deps.Projects.Create(ctx, project.Input{Name: ptr("Apollo")})
+	p, err := f.deps.Projects.Create(ctx, 0, project.Input{Name: ptr("Apollo")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,12 +282,10 @@ func TestWorkflowThroughTools(t *testing.T) {
 func TestMembershipIsEnforced(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	p, _ := f.deps.Projects.Create(ctx, project.Input{Name: ptr("Private")})
-	open, _ := f.deps.Projects.Create(ctx, project.Input{Name: ptr("Open")})
-	// A project with members is members-only; kim is not one.
-	if err := f.deps.Projects.SetMember(ctx, p.ID, f.admin.ID, project.RoleMember); err != nil {
-		t.Fatal(err)
-	}
+	// A project belongs to its creator; kim is not a member. A project with no
+	// members at all is open to everyone.
+	p, _ := f.deps.Projects.Create(ctx, f.admin.ID, project.Input{Name: ptr("Private")})
+	open, _ := f.deps.Projects.Create(ctx, 0, project.Input{Name: ptr("Open")})
 	st, _ := f.deps.Stories.Create(ctx, p.ID, f.admin.ID, story.CreateInput{Title: "Secret"})
 
 	kim := f.connect(t, f.kim)
@@ -306,21 +304,15 @@ func TestMembershipIsEnforced(t *testing.T) {
 		t.Fatal("non-member resource should fail")
 	}
 
-	// A viewer reads but cannot write.
-	if err := f.deps.Projects.SetMember(ctx, p.ID, f.kim.ID, project.RoleViewer); err != nil {
+	// Once a member, kim reads and writes.
+	if err := f.deps.Projects.SetMember(ctx, p.ID, f.kim.ID, project.RoleMember); err != nil {
 		t.Fatal(err)
 	}
 	var d story.Detail
 	mustCall(t, kim, "get_story", map[string]any{"id": st.ID}, &d)
-	for name, args := range map[string]map[string]any{
-		"create_story": {"project": "private", "title": "x"},
-		"update_story": {"id": st.ID, "title": "x"},
-		"move_story":   {"id": st.ID, "section": "backlog"},
-		"add_comment":  {"story_id": st.ID, "body": "x"},
-	} {
-		if msg := call(t, kim, name, args, nil); !strings.Contains(msg, "read-only") {
-			t.Errorf("viewer %s: %q", name, msg)
-		}
+	mustCall(t, kim, "update_story", map[string]any{"id": st.ID, "title": "edited by kim"}, &d)
+	if d.Title != "edited by kim" {
+		t.Fatalf("member update: %+v", d)
 	}
 }
 

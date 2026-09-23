@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -87,7 +88,7 @@ func TestEpicsTasksAndBulkMoveOverHTTP(t *testing.T) {
 }
 
 func TestMembershipIsEnforced(t *testing.T) {
-	_, ts := newServer(t, true)
+	srv, ts := newServer(t, true)
 	admin := newClient(t, ts)
 	admin.register("admin@example.com")
 	alice := newClient(t, ts)
@@ -95,20 +96,28 @@ func TestMembershipIsEnforced(t *testing.T) {
 	bob := newClient(t, ts)
 	bob.register("bob@example.com") // id 3
 
+	// The creator owns the project: it is hidden from everyone else.
 	alice.must(http.StatusCreated, "POST", "/api/projects", map[string]any{"name": "Secret"}, nil)
 	alice.must(http.StatusCreated, "POST", "/api/projects/1/stories", map[string]any{"title": "S", "section": "backlog"}, nil)
-
-	// Open project: everyone can read and write.
-	bob.must(http.StatusOK, "GET", "/api/projects/1/stories", nil, nil)
-
-	// Alice adds herself as a member → project closes to non-members.
 	var members []project.Member
-	alice.must(http.StatusOK, "PUT", "/api/projects/1/members/2", map[string]any{"role": "member"}, &members)
+	alice.must(http.StatusOK, "GET", "/api/projects/1/members", nil, &members)
+	if len(members) != 1 || members[0].UserID != 2 || members[0].Role != project.RoleOwner {
+		t.Fatalf("members after create = %+v", members)
+	}
+	var p struct {
+		CanWrite  bool `json:"can_write"`
+		CanManage bool `json:"can_manage"`
+	}
+	alice.must(http.StatusOK, "GET", "/api/projects/1", nil, &p)
+	if !p.CanWrite || !p.CanManage {
+		t.Fatalf("owner project = %+v", p)
+	}
 	bob.must(http.StatusNotFound, "GET", "/api/projects/1", nil, nil)
 	bob.must(http.StatusNotFound, "GET", "/api/projects/1/stories", nil, nil)
 	bob.must(http.StatusNotFound, "GET", "/api/stories/1", nil, nil)
 	bob.must(http.StatusNotFound, "PATCH", "/api/stories/1", map[string]any{"title": "x"}, nil)
 	bob.must(http.StatusNotFound, "GET", "/api/projects/1/events", nil, nil)
+	bob.must(http.StatusNotFound, "PUT", "/api/projects/1/members/3", map[string]any{"role": "member"}, nil)
 	var visible []project.Project
 	bob.must(http.StatusOK, "GET", "/api/projects", nil, &visible)
 	if len(visible) != 0 {
@@ -116,19 +125,42 @@ func TestMembershipIsEnforced(t *testing.T) {
 	}
 	admin.must(http.StatusOK, "GET", "/api/projects/1/stories", nil, nil) // admins always
 
-	// Viewer: read but not write.
-	alice.must(http.StatusOK, "PUT", "/api/projects/1/members/3", map[string]any{"role": "viewer"}, &members)
-	bob.must(http.StatusOK, "GET", "/api/projects/1/stories", nil, nil)
-	bob.must(http.StatusForbidden, "PATCH", "/api/stories/1", map[string]any{"title": "x"}, nil)
-	bob.must(http.StatusForbidden, "POST", "/api/projects/1/stories", map[string]any{"title": "x"}, nil)
-	bob.must(http.StatusForbidden, "POST", "/api/stories/1/comments", map[string]any{"body": "x"}, nil)
-	bob.must(http.StatusForbidden, "POST", "/api/stories/1/move", map[string]any{"section": "icebox"}, nil)
-	bob.must(http.StatusForbidden, "PUT", "/api/projects/1/members/3", map[string]any{"role": "member"}, nil)
-	bob.must(http.StatusCreated, "POST", "/api/projects/1/filters", map[string]any{"name": "mine", "query": "owner:me"}, nil) // own filters are fine
+	// Member: read and write, but not manage.
+	alice.must(http.StatusOK, "PUT", "/api/projects/1/members/3", map[string]any{"role": "member"}, &members)
+	bob.must(http.StatusOK, "GET", "/api/projects/1", nil, &p)
+	if !p.CanWrite || p.CanManage {
+		t.Fatalf("member project = %+v", p)
+	}
+	bob.must(http.StatusOK, "PATCH", "/api/stories/1", map[string]any{"title": "x"}, nil)
+	bob.must(http.StatusCreated, "POST", "/api/projects/1/filters", map[string]any{"name": "mine", "query": "owner:me"}, nil)
+	bob.must(http.StatusForbidden, "PATCH", "/api/projects/1", map[string]any{"name": "Renamed"}, nil)
+	bob.must(http.StatusForbidden, "PUT", "/api/projects/1/members/3", map[string]any{"role": "owner"}, nil)
+	bob.must(http.StatusForbidden, "DELETE", "/api/projects/1/members/2", nil, nil)
+	bob.must(http.StatusForbidden, "DELETE", "/api/projects/1", nil, nil)
+	alice.must(http.StatusUnprocessableEntity, "PUT", "/api/projects/1/members/3", map[string]any{"role": "viewer"}, nil)
 
-	// Last writer cannot leave; removing everyone reopens.
+	// The only owner can neither step down nor leave until there is another.
+	alice.must(http.StatusUnprocessableEntity, "PUT", "/api/projects/1/members/2", map[string]any{"role": "member"}, nil)
 	alice.must(http.StatusUnprocessableEntity, "DELETE", "/api/projects/1/members/2", nil, nil)
-	alice.must(http.StatusNoContent, "DELETE", "/api/projects/1/members/3", nil, nil)
+	alice.must(http.StatusOK, "PUT", "/api/projects/1/members/3", map[string]any{"role": "owner"}, &members)
 	alice.must(http.StatusNoContent, "DELETE", "/api/projects/1/members/2", nil, nil)
-	bob.must(http.StatusOK, "PATCH", "/api/stories/1", map[string]any{"title": "open again"}, nil)
+	alice.must(http.StatusNotFound, "GET", "/api/projects/1", nil, nil)
+	bob.must(http.StatusOK, "PATCH", "/api/projects/1", map[string]any{"name": "Bob's now"}, nil)
+
+	// An owner may delete the project. A project without members (from before
+	// ownership existed) is open to everyone but managed by administrators only.
+	bob.must(http.StatusNoContent, "DELETE", "/api/projects/1", nil, nil)
+	legacy := "Legacy"
+	open, err := srv.Projects.Create(context.Background(), 0, project.Input{Name: &legacy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/projects/" + open.Slug
+	alice.must(http.StatusOK, "GET", path, nil, &p)
+	if !p.CanWrite || p.CanManage {
+		t.Fatalf("open project = %+v", p)
+	}
+	alice.must(http.StatusForbidden, "PUT", path+"/members/2", map[string]any{"role": "owner"}, nil)
+	admin.must(http.StatusOK, "PUT", path+"/members/2", map[string]any{"role": "owner"}, &members)
+	bob.must(http.StatusNotFound, "GET", path, nil, nil)
 }

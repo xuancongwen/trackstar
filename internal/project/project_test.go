@@ -15,14 +15,14 @@ func TestCreateDefaultsAndUniqueSlug(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(database.NewTestDB(t), nil)
 
-	p, err := svc.Create(ctx, Input{Name: ptr("  Apollo: Launch Pad!  ")})
+	p, err := svc.Create(ctx, 0, Input{Name: ptr("  Apollo: Launch Pad!  ")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p.Slug != "apollo-launch-pad" || p.IterationLengthDays != 7 || p.IterationStartWeekday != 1 || p.VelocityWindow != 3 {
 		t.Fatalf("unexpected project: %+v", p)
 	}
-	p2, err := svc.Create(ctx, Input{Name: ptr("Apollo Launch Pad")})
+	p2, err := svc.Create(ctx, 0, Input{Name: ptr("Apollo Launch Pad")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestCreateDefaultsAndUniqueSlug(t *testing.T) {
 func TestUpdateIsPartialAndValidated(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(database.NewTestDB(t), nil)
-	p, err := svc.Create(ctx, Input{Name: ptr("Apollo")})
+	p, err := svc.Create(ctx, 0, Input{Name: ptr("Apollo")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,60 +66,73 @@ func TestMembershipAccess(t *testing.T) {
 	ctx := context.Background()
 	db := database.NewTestDB(t)
 	svc := NewService(db, nil)
-	p, _ := svc.Create(ctx, Input{Name: ptr("Apollo")})
-	open, _ := svc.Create(ctx, Input{Name: ptr("Open")})
 	alice := testutil.CreateUser(t, db, "alice@example.com")
 	bob := testutil.CreateUser(t, db, "bob@example.com")
+	p, _ := svc.Create(ctx, alice, Input{Name: ptr("Apollo")})
+	open, _ := svc.Create(ctx, 0, Input{Name: ptr("Open")})
 
-	// No members: open to all.
-	if a, _ := svc.AccessFor(ctx, p.ID, bob, false); !a.Read || !a.Write {
+	// The creator owns the project; nobody else sees it.
+	if a, _ := svc.AccessFor(ctx, p.ID, alice, false); !a.Read || !a.Write || !a.Manage {
+		t.Fatalf("owner access = %+v", a)
+	}
+	if a, _ := svc.AccessFor(ctx, p.ID, bob, false); a.Read || a.Write || a.Manage {
+		t.Fatalf("non-member access = %+v", a)
+	}
+	if a, _ := svc.AccessFor(ctx, p.ID, bob, true); !a.Manage {
+		t.Fatal("admins always have full access")
+	}
+	// A project without members is open to all but managed by admins only.
+	if a, _ := svc.AccessFor(ctx, open.ID, bob, false); !a.Read || !a.Write || a.Manage {
 		t.Fatalf("open project access = %+v", a)
+	}
+	visible, _ := svc.ListVisible(ctx, bob, false)
+	if len(visible) != 1 || visible[0].ID != open.ID {
+		t.Fatalf("bob sees %+v, want only the open project", visible)
+	}
+
+	// Members read and write but do not manage.
+	if err := svc.SetMember(ctx, p.ID, bob, RoleMember); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := svc.AccessFor(ctx, p.ID, bob, false); !a.Read || !a.Write || a.Manage {
+		t.Fatalf("member access = %+v", a)
+	}
+	if visible, _ := svc.ListVisible(ctx, bob, false); len(visible) != 2 {
+		t.Fatalf("bob sees %d projects, want 2", len(visible))
+	}
+	if err := svc.SetMember(ctx, p.ID, bob, "viewer"); apperr.KindOf(err) != apperr.KindInvalid {
+		t.Fatalf("bad role: err = %v", err)
+	}
+
+	// The only owner can neither step down nor leave; a second owner can.
+	if err := svc.SetMember(ctx, p.ID, alice, RoleMember); apperr.KindOf(err) != apperr.KindInvalid {
+		t.Fatalf("demoting the only owner: err = %v", err)
+	}
+	if err := svc.RemoveMember(ctx, p.ID, alice); apperr.KindOf(err) != apperr.KindInvalid {
+		t.Fatalf("removing the only owner: err = %v", err)
+	}
+	if err := svc.SetMember(ctx, p.ID, bob, RoleOwner); err != nil {
+		t.Fatal(err)
 	}
 	if err := svc.SetMember(ctx, p.ID, alice, RoleMember); err != nil {
 		t.Fatal(err)
 	}
-	if a, _ := svc.AccessFor(ctx, p.ID, bob, false); a.Read || a.Write {
-		t.Fatalf("non-member access = %+v", a)
-	}
-	if a, _ := svc.AccessFor(ctx, p.ID, bob, true); !a.Write {
-		t.Fatal("admins always have access")
-	}
-	if err := svc.SetMember(ctx, p.ID, bob, RoleViewer); err != nil {
+	if err := svc.RemoveMember(ctx, p.ID, alice); err != nil { // members may always be removed
 		t.Fatal(err)
 	}
-	if a, _ := svc.AccessFor(ctx, p.ID, bob, false); !a.Read || a.Write {
-		t.Fatalf("viewer access = %+v", a)
+	if err := svc.RemoveMember(ctx, p.ID, bob); apperr.KindOf(err) != apperr.KindInvalid {
+		t.Fatalf("removing the last owner: err = %v", err)
 	}
-	visible, _ := svc.ListVisible(ctx, bob, false)
-	if len(visible) != 2 {
-		t.Fatalf("bob sees %d projects, want 2 (member + open)", len(visible))
+	if members, _ := svc.Members(ctx, p.ID); len(members) != 1 || members[0].Role != RoleOwner {
+		t.Fatalf("members = %+v", members)
 	}
-	if err := svc.SetMember(ctx, p.ID, alice, RoleViewer); apperr.KindOf(err) != apperr.KindInvalid {
-		t.Fatalf("demoting the only writer: err = %v", err)
-	}
-	if err := svc.SetMember(ctx, p.ID, bob, "owner"); apperr.KindOf(err) != apperr.KindInvalid {
-		t.Fatalf("bad role: err = %v", err)
-	}
-	if err := svc.RemoveMember(ctx, p.ID, alice); apperr.KindOf(err) != apperr.KindInvalid {
-		t.Fatalf("removing the only writer: err = %v", err)
-	}
-	if err := svc.RemoveMember(ctx, p.ID, bob); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.RemoveMember(ctx, p.ID, alice); err != nil { // last member leaving reopens the project
-		t.Fatal(err)
-	}
-	if a, _ := svc.AccessFor(ctx, p.ID, bob, false); !a.Write {
-		t.Fatalf("reopened project access = %+v", a)
-	}
-	_ = open
 }
 
 func TestSavedFilters(t *testing.T) {
 	ctx := context.Background()
 	db := database.NewTestDB(t)
 	svc := NewService(db, nil)
-	p, _ := svc.Create(ctx, Input{Name: ptr("Apollo")})
+	p, _ := svc.Create(ctx, 0, Input{Name: ptr("Apollo")})
 	alice := testutil.CreateUser(t, db, "alice@example.com")
 	bob := testutil.CreateUser(t, db, "bob@example.com")
 

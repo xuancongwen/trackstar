@@ -72,9 +72,12 @@ you land on the board:
   the selection to the end of Icebox / Backlog / Current.
 - **Done** shows an accepted-points-per-iteration chart with the velocity line
   and pages through older iterations.
-- **Members** (Settings): a project with no members is open to everyone; add
-  members to make it members-only. Viewers can read but not change anything;
-  administrators always have access. Projects you cannot see are not listed.
+- **Members** (Settings): whoever creates a project owns it and adds the
+  others. Owners manage members and settings and may delete the project;
+  members read and write stories; administrators always have access. Projects
+  you are not in are not listed. A project with no members at all (from before
+  ownership existed) stays open to everyone until an administrator adds an
+  owner.
 - **On a phone** (≤ 900 px) the board shows one panel at a time with a tab
   strip (Icebox · Backlog · Current · Epics · Done · Trash), a full-width
   filter box, a ☰ menu for settings/account, and a floating **+** that creates
@@ -172,11 +175,15 @@ Design decisions worth knowing:
   the stream. Focus-refresh and a 5-minute poll remain as a safety net.
   The hub is single-process by design; a multi-instance PostgreSQL deployment
   would put `LISTEN/NOTIFY` behind the same two methods.
-- **Membership is opt-in.** A project with no members is open to every
-  signed-in user; adding the first member closes it to members (read/write),
-  viewers (read-only) and administrators. Hidden projects answer 404, so
-  membership does not leak which projects exist. Every handler checks access
-  through one helper (`internal/api/access.go`).
+- **Projects belong to their creator.** Creating a project makes the caller
+  its owner in the same transaction, so a project is members-only from birth.
+  Owners manage members, settings and deletion; members read and write; a
+  project must always keep one owner. Administrators have full access
+  everywhere. Hidden projects answer 404, so membership does not leak which
+  projects exist. Every handler checks access through one helper
+  (`internal/api/access.go`) at one of three levels: read, write, manage.
+  Projects that predate ownership and have no members stay open to everyone;
+  only an administrator can add their first owner.
 - **Epics are labels** with `is_epic` set; progress is computed from live
   stories at read time. Demoting an epic keeps the label on its stories.
 - **Filtering is client-side.** The board already holds every active story,
@@ -500,7 +507,7 @@ GET    /api/projects/:id/stories[?q=text | ?section=done | ?section=deleted]
 POST   /api/projects/:id/stories     {title, type?, estimate?, section?, description?, owner_id?, labels?}
 GET    /api/projects/:id/labels | /iterations | /velocity
 GET    /api/projects/:id/epics       POST … {name, description}     PATCH /api/epics/:id     DELETE /api/epics/:id (demotes to a label)
-GET    /api/projects/:id/members     PUT /api/projects/:id/members/:user {role: member|viewer}     DELETE …
+GET    /api/projects/:id/members     PUT /api/projects/:id/members/:user {role: owner|member}      DELETE …   (owners and admins)
 GET    /api/projects/:id/filters     POST … {name, query}           DELETE /api/filters/:id   (per user)
 POST   /api/stories/move             {ids, section, prev_id | next_id}   → {stories}   (ordered bulk move, one transaction)
 POST   /api/stories/:id/tasks {description}     PATCH /api/tasks/:id {description, done, position}     DELETE /api/tasks/:id
@@ -596,7 +603,8 @@ explain sections, the workflow and move semantics to the model.
 
 Deliberately absent: delete/restore, epic and member management, anything
 about accounts or tokens. Errors come back as tool errors with the API's
-message (`story 42 not found`, `you have read-only access to this project`),
+message (`story 42 not found`, `project apollo not found` for one the token's
+owner is not a member of),
 so the model can correct itself. Each tool call is one HTTP request with no
 server-side session: nothing to keep alive through the tunnel, nothing lost
 on a restart, and a revoked token stops the agent on its next call.
@@ -644,7 +652,7 @@ HTTP request that costs the same as the equivalent API call.
 | Every request logs the proxy's IP | Add the proxy to `TRACKSTAR_TRUSTED_PROXIES`. |
 | `429` on login | 20 attempts per 5 minutes per client IP; wait, or restart the service. |
 | Cloudflare error 1016 (Origin DNS error) on the tunnel hostname | The zone's DNS record for the hostname does not point at the running tunnel (`CNAME <tunnel-uuid>.cfargotunnel.com`). Delete the record and re-add the public hostname in the tunnel's settings, which recreates it. |
-| A project disappeared from the list | It has members and you are not one; ask a member or an administrator (Settings ▸ Members). |
+| A project disappeared from the list | You are not a member; ask one of its owners or an administrator to add you (Settings ▸ Members). |
 | "this account has been deactivated" | An administrator deactivated the account; another admin can reactivate it under *Users*. |
 | Forgotten password | On the server: `sudo -u trackstar sh -c 'set -a; . /etc/trackstar/trackstar.env; exec trackstar reset-password you@example.com'` (reads the new password from stdin, revokes sessions). |
 | "registration is disabled" | `TRACKSTAR_ALLOW_REGISTRATION=false` and an account exists. Enable it briefly to add a teammate. |
@@ -659,7 +667,7 @@ HTTP request that costs the same as the equivalent API call.
 ## Known limitations
 
 - Permissions are deliberately simple: administrator, and per-project
-  member/viewer. No organisations. No e-mail, so a forgotten password is reset
+  owner/member. No read-only role, no organisations. No e-mail, so a forgotten password is reset
   by an administrator (*Users*) or on the server (see Troubleshooting).
 - Changing a project's iteration length or start weekday renumbers past
   iterations (they are derived, not stored).

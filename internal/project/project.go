@@ -79,7 +79,11 @@ func NewService(store database.Store, now func() time.Time) *Service {
 	return &Service{store: store, now: now}
 }
 
-func (s *Service) Create(ctx context.Context, in Input) (Project, error) {
+// Create makes a project owned by ownerID, so it is visible only to its
+// members from the start. An ownerID of 0 leaves the project without members,
+// which keeps it open to everyone (as projects created before ownership
+// existed are).
+func (s *Service) Create(ctx context.Context, ownerID int64, in Input) (Project, error) {
 	p := Project{
 		IterationLengthDays:   DefaultIterationLengthDays,
 		IterationStartWeekday: DefaultStartWeekday,
@@ -104,7 +108,10 @@ func (s *Service) Create(ctx context.Context, in Input) (Project, error) {
 			VelocityWindow:        p.VelocityWindow,
 			Now:                   s.now().Unix(),
 		})
-		return err
+		if err != nil || ownerID == 0 {
+			return err
+		}
+		return q.UpsertProjectMember(ctx, dbgen.UpsertProjectMemberParams{ProjectID: row.ID, UserID: ownerID, Role: string(RoleOwner)})
 	})
 	if err != nil {
 		return Project{}, err

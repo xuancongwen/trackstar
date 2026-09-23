@@ -45,9 +45,11 @@ export interface Project {
   velocity_window: number
   /** Present on GET /api/projects/:id: whether the caller may change things. */
   can_write?: boolean
+  /** Present on GET /api/projects/:id: whether the caller may manage members, settings and deletion. */
+  can_manage?: boolean
 }
 
-export type Role = 'member' | 'viewer'
+export type Role = 'owner' | 'member'
 
 export interface Member {
   user_id: number

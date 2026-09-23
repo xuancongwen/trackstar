@@ -9,15 +9,17 @@ import (
 	"trackstar/internal/database/dbgen"
 )
 
-// Role of a project member. A project with no members is open to everyone.
+// Role of a project member. Whoever creates a project is its first owner.
+// A project with no members at all (created before ownership existed) is
+// open to everyone; only an administrator can add members to it.
 type Role string
 
 const (
+	RoleOwner  Role = "owner"  // read, write, manage members and settings, delete
 	RoleMember Role = "member" // read and write
-	RoleViewer Role = "viewer" // read only
 )
 
-func (r Role) Valid() bool { return r == RoleMember || r == RoleViewer }
+func (r Role) Valid() bool { return r == RoleOwner || r == RoleMember }
 
 type Member struct {
 	UserID int64 `json:"user_id"`
@@ -26,16 +28,17 @@ type Member struct {
 
 // Access is what a user may do in a project.
 type Access struct {
-	Read  bool
-	Write bool
+	Read   bool
+	Write  bool
+	Manage bool // members, settings and deletion
 }
 
 // AccessFor resolves a user's access. Administrators always have full access;
-// otherwise a project without members is open to all, and with members only
-// they may see it (viewers read-only).
+// otherwise a project without members is open to all (but managed only by
+// administrators), and with members only they may see it.
 func (s *Service) AccessFor(ctx context.Context, projectID, userID int64, isAdmin bool) (Access, error) {
 	if isAdmin {
-		return Access{Read: true, Write: true}, nil
+		return Access{Read: true, Write: true, Manage: true}, nil
 	}
 	n, err := s.store.CountProjectMembers(ctx, projectID)
 	if err != nil {
@@ -51,7 +54,7 @@ func (s *Service) AccessFor(ctx context.Context, projectID, userID int64, isAdmi
 	if err != nil {
 		return Access{}, err
 	}
-	return Access{Read: true, Write: Role(role) == RoleMember}, nil
+	return Access{Read: true, Write: true, Manage: Role(role) == RoleOwner}, nil
 }
 
 // ListVisible returns the projects a user may see.
@@ -82,12 +85,11 @@ func (s *Service) Members(ctx context.Context, projectID int64) ([]Member, error
 	return out, nil
 }
 
-// SetMember adds or changes a member. The caller must be a writer of the
-// project (checked by the API). A member cannot demote themselves to viewer
-// if that would leave the project without any member able to write.
+// SetMember adds or changes a member. The caller must be allowed to manage
+// the project (checked by the API). The last owner cannot be demoted.
 func (s *Service) SetMember(ctx context.Context, projectID, userID int64, role Role) error {
 	if !role.Valid() {
-		return apperr.Invalid("role must be member or viewer")
+		return apperr.Invalid("role must be owner or member")
 	}
 	return s.store.InTx(ctx, func(q dbgen.Querier) error {
 		if _, err := q.GetProject(ctx, projectID); err != nil {
@@ -100,8 +102,8 @@ func (s *Service) SetMember(ctx context.Context, projectID, userID int64, role R
 		if !u.IsActive {
 			return apperr.Invalid("this user is deactivated")
 		}
-		if role == RoleViewer {
-			if err := ensureAnotherWriter(ctx, q, projectID, userID); err != nil {
+		if role != RoleOwner {
+			if err := ensureAnotherOwner(ctx, q, projectID, userID); err != nil {
 				return err
 			}
 		}
@@ -109,32 +111,37 @@ func (s *Service) SetMember(ctx context.Context, projectID, userID int64, role R
 	})
 }
 
+// RemoveMember removes a member. The last owner cannot be removed.
 func (s *Service) RemoveMember(ctx context.Context, projectID, userID int64) error {
 	return s.store.InTx(ctx, func(q dbgen.Querier) error {
-		if err := ensureAnotherWriter(ctx, q, projectID, userID); err != nil {
+		if err := ensureAnotherOwner(ctx, q, projectID, userID); err != nil {
 			return err
 		}
 		return q.DeleteProjectMember(ctx, dbgen.DeleteProjectMemberParams{ProjectID: projectID, UserID: userID})
 	})
 }
 
-// ensureAnotherWriter refuses a change that would leave a members-only
-// project with nobody but administrators able to write to it — unless the
-// change empties the member list entirely, which reopens the project.
-func ensureAnotherWriter(ctx context.Context, q dbgen.Querier, projectID, exceptUser int64) error {
+// ensureAnotherOwner refuses to demote or remove user when they are the
+// project's only owner, so an owned project always keeps someone who can
+// manage it. Users who are not owners can always be changed.
+func ensureAnotherOwner(ctx context.Context, q dbgen.Querier, projectID, user int64) error {
 	members, err := q.ListProjectMembers(ctx, projectID)
 	if err != nil {
 		return err
 	}
-	if len(members) <= 1 {
-		return nil // last member leaving reopens the project
-	}
+	isOwner := false
 	for _, m := range members {
-		if m.UserID != exceptUser && Role(m.Role) == RoleMember {
-			return nil
+		switch {
+		case m.UserID == user:
+			isOwner = Role(m.Role) == RoleOwner
+		case Role(m.Role) == RoleOwner:
+			return nil // another owner remains
 		}
 	}
-	return apperr.Invalid("this would leave the project without a member who can write")
+	if isOwner {
+		return apperr.Invalid("a project must keep at least one owner")
+	}
+	return nil
 }
 
 func notFoundErr(err error, what string) error {

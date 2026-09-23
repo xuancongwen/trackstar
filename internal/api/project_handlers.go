@@ -3,7 +3,6 @@ package api
 import (
 	"net/http"
 
-	"trackstar/internal/apperr"
 	"trackstar/internal/project"
 )
 
@@ -23,7 +22,8 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	p, err := s.Projects.Create(r.Context(), in)
+	// The creator owns the project, so it is members-only from the start.
+	p, err := s.Projects.Create(r.Context(), currentUser(r.Context()).ID, in)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -32,7 +32,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, false)
+	p, err := s.projectFromPath(r, readAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -45,12 +45,13 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, struct {
 		project.Project
-		CanWrite bool `json:"can_write"`
-	}{p, access.Write})
+		CanWrite  bool `json:"can_write"`
+		CanManage bool `json:"can_manage"`
+	}{p, access.Write, access.Manage})
 }
 
 func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, true)
+	p, err := s.projectFromPath(r, manageAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -70,11 +71,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
-	if !currentUser(r.Context()).IsAdmin {
-		s.fail(w, r, apperr.Forbidden("only an administrator can delete a project"))
-		return
-	}
-	p, err := s.projectFromPath(r, true)
+	p, err := s.projectFromPath(r, manageAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -87,7 +84,7 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListIterations(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, false)
+	p, err := s.projectFromPath(r, readAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -101,7 +98,7 @@ func (s *Server) handleListIterations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleVelocity(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, false)
+	p, err := s.projectFromPath(r, readAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -117,7 +114,7 @@ func (s *Server) handleVelocity(w http.ResponseWriter, r *http.Request) {
 // --- members -------------------------------------------------------------------------
 
 func (s *Server) handleListMembers(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, false)
+	p, err := s.projectFromPath(r, readAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -131,7 +128,7 @@ func (s *Server) handleListMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetMember(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, true)
+	p, err := s.projectFromPath(r, manageAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -162,7 +159,7 @@ func (s *Server) handleSetMember(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, true)
+	p, err := s.projectFromPath(r, manageAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -183,7 +180,7 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 // --- saved filters (per user, per project) ------------------------------------------------
 
 func (s *Server) handleListFilters(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, false)
+	p, err := s.projectFromPath(r, readAccess)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -197,7 +194,7 @@ func (s *Server) handleListFilters(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSaveFilter(w http.ResponseWriter, r *http.Request) {
-	p, err := s.projectFromPath(r, false) // viewers may save their own filters
+	p, err := s.projectFromPath(r, readAccess) // viewers may save their own filters
 	if err != nil {
 		s.fail(w, r, err)
 		return
