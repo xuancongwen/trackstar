@@ -1,8 +1,11 @@
 # Trackstar
 
 A lightweight, self-hosted project tracker in the spirit of Pivotal Tracker:
-Icebox → Backlog → Current iteration, points, velocity, and a keyboard-friendly
-board. One Go binary, one SQLite file, no other services.
+icebox, backlog, iterations, points and velocity on a keyboard-friendly board.
+One Go binary, one SQLite file, no other services, with a REST API and an MCP
+server so AI agents can work in your projects too.
+
+Source: <https://github.com/xuancongwen/trackstar> · MIT licensed.
 
 | | |
 |---|---|
@@ -31,6 +34,8 @@ board. One Go binary, one SQLite file, no other services.
 - [Resource usage](#resource-usage)
 - [Troubleshooting](#troubleshooting)
 - [Known limitations](#known-limitations)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Using it
 
@@ -357,8 +362,8 @@ binary, writes `trackstar.env` (generating a session secret), installs and
 enables the hardened systemd unit, starts it and waits for `/health`. It is
 idempotent: re-running keeps configuration, secret and data, and only changes
 options you pass explicitly. Other sources for the binary: `--binary PATH`,
-`--release-url URL`, `--repo OWNER/NAME [--version TAG]` (GitHub releases; the
-repo is remembered for `update.sh`).
+`--release-url URL`, `--repo OWNER/NAME [--version TAG]` (GitHub releases, e.g.
+`--repo xuancongwen/trackstar`; the repo is remembered for `update.sh`).
 
 Put TLS in front of it: a Cloudflare Tunnel (below), or Caddy/nginx on the same
 machine with `TRACKSTAR_ADDR=127.0.0.1:3000`. After creating your accounts set
@@ -690,3 +695,19 @@ HTTP request that costs the same as the equivalent API call.
 - PostgreSQL is designed for but not implemented.
 - On phones there is no cross-panel drag (use the drawer's Move to) and no
   multi-select; keyboard shortcuts need a keyboard.
+
+## Contributing
+
+Bug reports and pull requests are welcome at
+<https://github.com/xuancongwen/trackstar/issues>. Before opening a pull
+request run `make lint test`, and `make sqlc` if you changed `db/queries`
+(CI fails when `internal/database/dbgen` is stale); `make build e2e` covers the
+browser tests if you have Chrome or Chromium installed. Keep changes focused,
+and add or update a test where one is practical. Never edit an applied
+migration; add a new one (see [Development setup](#development-setup)).
+
+Security issues: please do not open a public issue; see [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE).
