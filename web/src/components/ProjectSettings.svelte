@@ -43,6 +43,7 @@
     iteration_start_weekday: project.iteration_start_weekday,
     velocity_window: project.velocity_window,
     estimate_bugs_and_chores: project.estimate_bugs_and_chores,
+    combine_icebox_backlog: project.combine_icebox_backlog,
   })
   // Unticking the option removes the points bugs and chores already have.
   let droppingPoints = $derived(project.estimate_bugs_and_chores && !form.estimate_bugs_and_chores)
@@ -130,6 +131,11 @@
           ? 'Points already on bugs and chores will be removed, and their history recounted.'
           : 'Off: only features are estimated. On: bugs and chores may carry points too, and they count towards velocity.'}
       </p>
+      <label class="check">
+        <input type="checkbox" bind:checked={form.combine_icebox_backlog} />
+        <span>Combine icebox and backlog</span>
+      </label>
+      <p class="muted">One panel: the backlog on top, the icebox below it under its own divider. Stories keep their section.</p>
     </fieldset>
     <p class="muted">
       {canManage

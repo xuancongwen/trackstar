@@ -108,6 +108,28 @@ try {
   await page.keyboard.press('Escape')
   t.eq('topbar shows the new name', await page.$eval('.menu > button', (e) => e.textContent.trim()), 'Samantha ▾')
 
+  // --- combined icebox + backlog view (a browser preference; stories keep their section)
+  const combineInSettings = async () => {
+    await page.evaluate(() => [...document.querySelectorAll('header.topbar button')].find((b) => b.textContent.trim() === 'Settings').click())
+    await page.waitForSelector('form[aria-label="Project settings"]')
+    await page.evaluate(() => [...document.querySelectorAll('form[aria-label="Project settings"] label.check')].find((l) => l.textContent.includes('Combine icebox')).querySelector('input').click())
+    await page.click('form[aria-label="Project settings"] button.primary')
+    await page.waitForFunction(() => !document.querySelector('form[aria-label="Project settings"]'))
+    await sleep(400)
+  }
+  await combineInSettings()
+  t.eq('icebox folds into the backlog panel', await page.$$eval('section.panel', (els) => els.map((e) => e.getAttribute('aria-label')).filter((l) => l !== 'Deleted')), ['Backlog', 'Current iteration'])
+  t.eq('divider shows the icebox count', await page.$eval('.divider', (e) => e.textContent.replace(/\s+/g, ' ').trim()), 'Icebox 1 stories +')
+  t.eq('icebox list is still its own drop target', await order(page, 'icebox'), ['Dark mode'])
+  await dragOnto(page, sel(await id('Dark mode')), sel(await id('CSV export')), false)
+  t.eq('drag from the icebox tail to the top of the backlog', await order(page, 'backlog').then((o) => o[0]), 'Dark mode')
+  await dragToEmptySpace(page, sel(await id('Dark mode')), 'icebox')
+  t.eq('drag back into the icebox tail', await order(page, 'icebox'), ['Dark mode'])
+  await page.reload({ waitUntil: 'domcontentloaded' }); await page.waitForSelector('[data-story-id]')
+  t.eq('combined view survives a reload', await page.$$eval('section.panel', (els) => els.length), 2)
+  await combineInSettings()
+  t.eq('separate icebox panel again', await page.$$eval('section.panel', (els) => els.map((e) => e.getAttribute('aria-label')).filter((l) => l !== 'Deleted')), ['Icebox', 'Backlog', 'Current iteration'])
+
   // --- project switcher (the project name in the top bar)
   const zephyr = await api('POST', '/api/projects', { name: 'Zephyr' })
   await page.click('.switcher > button'); await page.waitForSelector('.switcher-items [role="option"]')

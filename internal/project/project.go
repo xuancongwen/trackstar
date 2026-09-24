@@ -32,9 +32,12 @@ type Project struct {
 	VelocityWindow        int64  `json:"velocity_window"`
 	// EstimateBugsAndChores lets bugs and chores carry points that count
 	// towards velocity. Off by default: only features are estimated.
-	EstimateBugsAndChores bool      `json:"estimate_bugs_and_chores"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	EstimateBugsAndChores bool `json:"estimate_bugs_and_chores"`
+	// CombineIceboxBacklog is a view setting: the board shows the icebox at
+	// the bottom of the backlog panel instead of in a panel of its own.
+	CombineIceboxBacklog bool      `json:"combine_icebox_backlog"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 	// ArchivedAt is set while the project is archived: kept, listed, but
 	// read-only for everyone until an owner unarchives it.
 	ArchivedAt *time.Time `json:"archived_at"`
@@ -63,6 +66,7 @@ func FromRow(r dbgen.Project) Project {
 		IterationStartWeekday: r.IterationStartWeekday,
 		VelocityWindow:        r.VelocityWindow,
 		EstimateBugsAndChores: r.EstimateBugsAndChores,
+		CombineIceboxBacklog:  r.CombineIceboxBacklog,
 		CreatedAt:             time.Unix(r.CreatedAt, 0).UTC(),
 		UpdatedAt:             time.Unix(r.UpdatedAt, 0).UTC(),
 	}
@@ -82,6 +86,7 @@ type Input struct {
 	IterationStartWeekday *int64  `json:"iteration_start_weekday"`
 	VelocityWindow        *int64  `json:"velocity_window"`
 	EstimateBugsAndChores *bool   `json:"estimate_bugs_and_chores"`
+	CombineIceboxBacklog  *bool   `json:"combine_icebox_backlog"`
 }
 
 type Service struct {
@@ -124,6 +129,7 @@ func (s *Service) Create(ctx context.Context, ownerID int64, in Input) (Project,
 			IterationStartWeekday: p.IterationStartWeekday,
 			VelocityWindow:        p.VelocityWindow,
 			EstimateBugsAndChores: p.EstimateBugsAndChores,
+			CombineIceboxBacklog:  p.CombineIceboxBacklog,
 			Now:                   s.now().Unix(),
 		})
 		if err != nil || ownerID == 0 {
@@ -199,6 +205,7 @@ func (s *Service) Update(ctx context.Context, id int64, in Input) (Project, erro
 			IterationStartWeekday: p.IterationStartWeekday,
 			VelocityWindow:        p.VelocityWindow,
 			EstimateBugsAndChores: p.EstimateBugsAndChores,
+			CombineIceboxBacklog:  p.CombineIceboxBacklog,
 			Now:                   now,
 		})
 		if err != nil {
@@ -270,6 +277,9 @@ func apply(p *Project, in Input) error {
 	}
 	if in.EstimateBugsAndChores != nil {
 		p.EstimateBugsAndChores = *in.EstimateBugsAndChores
+	}
+	if in.CombineIceboxBacklog != nil {
+		p.CombineIceboxBacklog = *in.CombineIceboxBacklog
 	}
 
 	switch {

@@ -102,6 +102,10 @@
   let filterCtx = $derived({ me: user, users, blocking: blockingSet(stories) })
   let filtering = $derived(terms.length > 0)
   let visible = $derived((s: Story) => !filtering || matchesFilter(s, terms, filterCtx))
+  // Project setting: the icebox is a panel of its own or the tail of the
+  // backlog panel. The stories keep their sections either way.
+  let combineIcebox = $derived(project?.combine_icebox_backlog === true)
+  let panelSections = $derived<DropSection[]>(combineIcebox ? ['backlog', 'current'] : SECTIONS)
   let lists = $derived({
     icebox: sectionStories(stories, 'icebox').filter(visible),
     backlog: sectionStories(stories, 'backlog').filter(visible),
@@ -127,6 +131,15 @@
         : storyRows(lists.backlog),
     current: storyRows(lists.current),
   })
+
+  let mobileTabs = $derived<[MobileTab, string, number | null][]>([
+    ...(combineIcebox ? [] : [['icebox', 'Icebox', lists.icebox.length] as [MobileTab, string, number]]),
+    ['backlog', 'Backlog', lists.backlog.length + (combineIcebox ? lists.icebox.length : 0)],
+    ['current', 'Current', lists.current.length + accepted.length],
+    ['epics', 'Epics', epics.length],
+    ['done', 'Done', null],
+    ['trash', 'Trash', null],
+  ])
 
   let currentTotal = $derived(totalPoints(lists.current) + totalPoints(accepted))
   let blockedInCurrent = $derived(lists.current.filter((s) => s.blocked).length)
@@ -376,6 +389,7 @@
   }
   // Which panels the data loaders keep fresh: on a phone, the visible tab.
   $effect(() => {
+    if (combineIcebox && mobileTab === 'icebox') mobileTab = 'backlog'
     if (mobile) {
       showDone = mobileTab === 'done'
       showTrash = mobileTab === 'trash'
@@ -395,7 +409,10 @@
   // --- keyboard ---------------------------------------------------------------
 
   function columns(): number[][] {
-    return [lists.icebox, lists.backlog, [...accepted, ...lists.current]].map((list) => list.map((s) => s.id))
+    const cols = combineIcebox
+      ? [[...lists.backlog, ...lists.icebox], [...accepted, ...lists.current]]
+      : [lists.icebox, lists.backlog, [...accepted, ...lists.current]]
+    return cols.map((list) => list.map((s) => s.id))
   }
 
   function moveSelection(dy: number, dx: number) {
@@ -659,7 +676,7 @@
         />
       </div>
       <nav class="tabs" aria-label="Panels">
-        {#each [['icebox', 'Icebox', lists.icebox.length], ['backlog', 'Backlog', lists.backlog.length], ['current', 'Current', lists.current.length + accepted.length], ['epics', 'Epics', epics.length], ['done', 'Done', null], ['trash', 'Trash', null]] as const as [tab, label, count] (tab)}
+        {#each mobileTabs as [tab, label, count] (tab)}
           <button class:on={mobileTab === tab} onclick={() => selectTab(tab)} role="tab" aria-selected={mobileTab === tab}>
             {label}{#if count !== null && count > 0}<span class="count">{count}</span>{/if}
           </button>
@@ -672,7 +689,7 @@
       class:mobile
       style:grid-template-columns={mobile
         ? 'minmax(0, 1fr)'
-        : `${showEpics ? 'minmax(0, 0.7fr) ' : ''}repeat(${3 + Number(showDone) + Number(showTrash)}, minmax(0, 1fr))`}
+        : `${showEpics ? 'minmax(0, 0.7fr) ' : ''}repeat(${panelSections.length + Number(showDone) + Number(showTrash)}, minmax(0, 1fr))`}
     >
       {#if mobile ? mobileTab === 'epics' : showEpics}
         <EpicsPanel projectId={project.id} {epics} active={activeEpic} canWrite={!readOnly} onchanged={loadEpics} onselect={(n) => (activeEpic = n)} />
@@ -683,10 +700,11 @@
       {#if mobile ? mobileTab === 'trash' : showTrash}
         <TrashPanel stories={trashStories} onrestore={(s) => restoreStory(s.id)} onopen={openStoryRow} />
       {/if}
-      {#each SECTIONS.filter((s) => !mobile || s === mobileTab) as section (section)}
+      {#each panelSections.filter((s) => !mobile || s === mobileTab) as section (section)}
         <Panel
           {section}
           rows={rows[section]}
+          sub={combineIcebox && section === 'backlog' ? { section: 'icebox', rows: rows.icebox, summary: summaries.icebox } : undefined}
           {users}
           {selectedId}
           {busyIds}

@@ -289,7 +289,7 @@ func (q *Queries) ListProjectMembers(ctx context.Context, projectID int64) ([]Li
 }
 
 const listProjectsForUser = `-- name: ListProjectsForUser :many
-SELECT projects.id, projects.name, projects.description, projects.slug, projects.iteration_length_days, projects.iteration_start_weekday, projects.velocity_window, projects.created_at, projects.updated_at, projects.archived_at, projects.estimate_bugs_and_chores FROM projects
+SELECT projects.id, projects.name, projects.description, projects.slug, projects.iteration_length_days, projects.iteration_start_weekday, projects.velocity_window, projects.created_at, projects.updated_at, projects.archived_at, projects.estimate_bugs_and_chores, projects.combine_icebox_backlog FROM projects
 WHERE NOT EXISTS (SELECT 1 FROM project_members WHERE project_members.project_id = projects.id)
    OR EXISTS (SELECT 1 FROM project_members WHERE project_members.project_id = projects.id AND project_members.user_id = ?1)
 ORDER BY projects.name, projects.id
@@ -317,6 +317,7 @@ func (q *Queries) ListProjectsForUser(ctx context.Context, userID int64) ([]Proj
 			&i.UpdatedAt,
 			&i.ArchivedAt,
 			&i.EstimateBugsAndChores,
+			&i.CombineIceboxBacklog,
 		); err != nil {
 			return nil, err
 		}

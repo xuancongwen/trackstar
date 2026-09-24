@@ -57,6 +57,7 @@ type Project struct {
 	UpdatedAt             int64
 	ArchivedAt            sql.NullInt64
 	EstimateBugsAndChores bool
+	CombineIceboxBacklog  bool
 }
 
 type ProjectMember struct {

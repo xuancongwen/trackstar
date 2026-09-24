@@ -1,9 +1,9 @@
 -- name: CreateProject :one
 INSERT INTO projects (name, description, slug, iteration_length_days, iteration_start_weekday,
-                      velocity_window, estimate_bugs_and_chores, created_at, updated_at)
+                      velocity_window, estimate_bugs_and_chores, combine_icebox_backlog, created_at, updated_at)
 VALUES (sqlc.arg(name), sqlc.arg(description), sqlc.arg(slug), sqlc.arg(iteration_length_days),
         sqlc.arg(iteration_start_weekday), sqlc.arg(velocity_window), sqlc.arg(estimate_bugs_and_chores),
-        sqlc.arg(now), sqlc.arg(now))
+        sqlc.arg(combine_icebox_backlog), sqlc.arg(now), sqlc.arg(now))
 RETURNING *;
 
 -- name: GetProject :one
@@ -23,6 +23,7 @@ SET name = sqlc.arg(name),
     iteration_start_weekday = sqlc.arg(iteration_start_weekday),
     velocity_window = sqlc.arg(velocity_window),
     estimate_bugs_and_chores = sqlc.arg(estimate_bugs_and_chores),
+    combine_icebox_backlog = sqlc.arg(combine_icebox_backlog),
     updated_at = sqlc.arg(now)
 WHERE id = sqlc.arg(id)
 RETURNING *;

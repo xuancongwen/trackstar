@@ -33,11 +33,11 @@ func (q *Queries) ClearNonFeatureEstimates(ctx context.Context, arg ClearNonFeat
 
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (name, description, slug, iteration_length_days, iteration_start_weekday,
-                      velocity_window, estimate_bugs_and_chores, created_at, updated_at)
+                      velocity_window, estimate_bugs_and_chores, combine_icebox_backlog, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4,
         ?5, ?6, ?7,
-        ?8, ?8)
-RETURNING id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores
+        ?8, ?9, ?9)
+RETURNING id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores, combine_icebox_backlog
 `
 
 type CreateProjectParams struct {
@@ -48,6 +48,7 @@ type CreateProjectParams struct {
 	IterationStartWeekday int64
 	VelocityWindow        int64
 	EstimateBugsAndChores bool
+	CombineIceboxBacklog  bool
 	Now                   int64
 }
 
@@ -60,6 +61,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.IterationStartWeekday,
 		arg.VelocityWindow,
 		arg.EstimateBugsAndChores,
+		arg.CombineIceboxBacklog,
 		arg.Now,
 	)
 	var i Project
@@ -75,6 +77,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.UpdatedAt,
 		&i.ArchivedAt,
 		&i.EstimateBugsAndChores,
+		&i.CombineIceboxBacklog,
 	)
 	return i, err
 }
@@ -89,7 +92,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id int64) error {
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores FROM projects WHERE id = ?1
+SELECT id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores, combine_icebox_backlog FROM projects WHERE id = ?1
 `
 
 func (q *Queries) GetProject(ctx context.Context, id int64) (Project, error) {
@@ -107,12 +110,13 @@ func (q *Queries) GetProject(ctx context.Context, id int64) (Project, error) {
 		&i.UpdatedAt,
 		&i.ArchivedAt,
 		&i.EstimateBugsAndChores,
+		&i.CombineIceboxBacklog,
 	)
 	return i, err
 }
 
 const getProjectBySlug = `-- name: GetProjectBySlug :one
-SELECT id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores FROM projects WHERE slug = ?1
+SELECT id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores, combine_icebox_backlog FROM projects WHERE slug = ?1
 `
 
 func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, error) {
@@ -130,12 +134,13 @@ func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, e
 		&i.UpdatedAt,
 		&i.ArchivedAt,
 		&i.EstimateBugsAndChores,
+		&i.CombineIceboxBacklog,
 	)
 	return i, err
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores FROM projects ORDER BY name, id
+SELECT id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores, combine_icebox_backlog FROM projects ORDER BY name, id
 `
 
 func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
@@ -159,6 +164,7 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 			&i.UpdatedAt,
 			&i.ArchivedAt,
 			&i.EstimateBugsAndChores,
+			&i.CombineIceboxBacklog,
 		); err != nil {
 			return nil, err
 		}
@@ -178,7 +184,7 @@ UPDATE projects
 SET archived_at = ?1,
     updated_at = ?2
 WHERE id = ?3
-RETURNING id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores
+RETURNING id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores, combine_icebox_backlog
 `
 
 type SetProjectArchivedParams struct {
@@ -202,6 +208,7 @@ func (q *Queries) SetProjectArchived(ctx context.Context, arg SetProjectArchived
 		&i.UpdatedAt,
 		&i.ArchivedAt,
 		&i.EstimateBugsAndChores,
+		&i.CombineIceboxBacklog,
 	)
 	return i, err
 }
@@ -214,9 +221,10 @@ SET name = ?1,
     iteration_start_weekday = ?4,
     velocity_window = ?5,
     estimate_bugs_and_chores = ?6,
-    updated_at = ?7
-WHERE id = ?8
-RETURNING id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores
+    combine_icebox_backlog = ?7,
+    updated_at = ?8
+WHERE id = ?9
+RETURNING id, name, description, slug, iteration_length_days, iteration_start_weekday, velocity_window, created_at, updated_at, archived_at, estimate_bugs_and_chores, combine_icebox_backlog
 `
 
 type UpdateProjectParams struct {
@@ -226,6 +234,7 @@ type UpdateProjectParams struct {
 	IterationStartWeekday int64
 	VelocityWindow        int64
 	EstimateBugsAndChores bool
+	CombineIceboxBacklog  bool
 	Now                   int64
 	ID                    int64
 }
@@ -238,6 +247,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.IterationStartWeekday,
 		arg.VelocityWindow,
 		arg.EstimateBugsAndChores,
+		arg.CombineIceboxBacklog,
 		arg.Now,
 		arg.ID,
 	)
@@ -254,6 +264,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.UpdatedAt,
 		&i.ArchivedAt,
 		&i.EstimateBugsAndChores,
+		&i.CombineIceboxBacklog,
 	)
 	return i, err
 }

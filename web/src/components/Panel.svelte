@@ -20,6 +20,12 @@
     summary?: string
     /** Rendered above the sortable list (accepted stories, progress…). */
     top?: Snippet
+    /**
+     * A second section stacked below the first under its own divider: the
+     * combined view shows the icebox at the bottom of the backlog panel. Each
+     * section keeps its own sortable list, so drops land unambiguously.
+     */
+    sub?: { section: DropSection; rows: BacklogRow[]; summary?: string }
     dragDisabled?: boolean
     /** A drag is in progress somewhere on the board. */
     dragging?: boolean
@@ -44,6 +50,7 @@
     readOnly = false,
     summary = '',
     top,
+    sub,
     dragDisabled = false,
     dragging = false,
     canDrop,
@@ -56,7 +63,7 @@
     ontoggle,
   }: Props = $props()
 
-  let storyCount = $derived(rows.filter((r) => r.kind === 'story').length)
+  const storyCount = (list: BacklogRow[]) => list.filter((r) => r.kind === 'story').length
 </script>
 
 <section class="panel" aria-label={SECTION_TITLES[section]}>
@@ -68,50 +75,64 @@
 
   <div class="scroll">
     {@render top?.()}
-    <!-- The list fills the rest of the column, so dropping anywhere below the
-         last row appends to the end. -->
-    <div
-      class="list"
-      class:empty={storyCount === 0}
-      class:dragging
-      use:sortableList={{
-        section,
-        canDrop: (id, target) => !dragDisabled && canDrop(id, target),
-        onDrop: ondrop,
-        onDragState: ondragstate,
-      }}
-    >
-      {#each rows as row (row.key)}
-        {#if row.kind === 'marker'}
-          <div class="marker" data-no-drag>
-            <span>Iteration {row.number} · {formatDay(row.startAt)}</span>
-            <span>{row.points} pts</span>
-          </div>
-        {:else}
-          <StoryRow
-            story={row.story}
-            {users}
-            selected={row.story.id === selectedId}
-            busy={busyIds.has(row.story.id)}
-            recent={recentIds.has(row.story.id)}
-            checked={checkedIds.has(row.story.id)}
-            {epicNames}
-            {readOnly}
-            {ontoggle}
-            {onopen}
-            {onaction}
-            {onestimate}
-          />
-        {/if}
-      {/each}
-      {#if storyCount === 0}
-        <p class="hint muted" data-no-drag>
-          {dragDisabled ? 'No matching stories.' : readOnly ? 'Nothing here.' : 'Nothing here. Drag a story in or press +.'}
-        </p>
-      {/if}
-    </div>
+    {@render list(section, rows, sub === undefined)}
+    {#if sub}
+      <div class="divider">
+        <h3>{SECTION_TITLES[sub.section]}</h3>
+        <span class="summary">{sub.summary ?? ''}</span>
+        {#if !readOnly}<button class="add" title={`Add story to ${SECTION_TITLES[sub.section]}`} onclick={() => onadd(sub.section)}>+</button>{/if}
+      </div>
+      {@render list(sub.section, sub.rows, true)}
+    {/if}
   </div>
 </section>
+
+{#snippet list(section: DropSection, rows: BacklogRow[], fill: boolean)}
+  {@const count = storyCount(rows)}
+  <!-- A filling list takes the rest of the column, so dropping anywhere below
+       the last row appends to the end. -->
+  <div
+    class="list"
+    class:fill
+    class:empty={count === 0}
+    class:dragging
+    use:sortableList={{
+      section,
+      canDrop: (id, target) => !dragDisabled && canDrop(id, target),
+      onDrop: ondrop,
+      onDragState: ondragstate,
+    }}
+  >
+    {#each rows as row (row.key)}
+      {#if row.kind === 'marker'}
+        <div class="marker" data-no-drag>
+          <span>Iteration {row.number} · {formatDay(row.startAt)}</span>
+          <span>{row.points} pts</span>
+        </div>
+      {:else}
+        <StoryRow
+          story={row.story}
+          {users}
+          selected={row.story.id === selectedId}
+          busy={busyIds.has(row.story.id)}
+          recent={recentIds.has(row.story.id)}
+          checked={checkedIds.has(row.story.id)}
+          {epicNames}
+          {readOnly}
+          {ontoggle}
+          {onopen}
+          {onaction}
+          {onestimate}
+        />
+      {/if}
+    {/each}
+    {#if count === 0}
+      <p class="hint muted" data-no-drag>
+        {dragDisabled ? 'No matching stories.' : readOnly ? 'Nothing here.' : 'Nothing here. Drag a story in or press +.'}
+      </p>
+    {/if}
+  </div>
+{/snippet}
 
 <style>
   .panel {
@@ -161,15 +182,38 @@
     flex-direction: column;
   }
   .list {
-    flex: 1;
+    flex: 0 0 auto;
     min-height: 56px;
     border-radius: 4px;
     outline: 2px dashed transparent;
     outline-offset: -4px;
     transition: outline-color 120ms;
   }
+  .list.fill {
+    flex: 1;
+  }
   .list.dragging {
     outline-color: var(--border);
+  }
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .divider h3 {
+    margin: 0;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .divider .add {
+    color: var(--muted);
+    border-color: var(--border);
   }
   .marker {
     display: flex;

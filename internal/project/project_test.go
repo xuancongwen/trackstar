@@ -52,6 +52,9 @@ func TestUpdateIsPartialAndValidated(t *testing.T) {
 	if got, err = svc.Update(ctx, p.ID, Input{EstimateBugsAndChores: &on}); err != nil || !got.EstimateBugsAndChores || got.VelocityWindow != 5 {
 		t.Fatalf("enabling bug and chore points: %+v, %v", got, err)
 	}
+	if got, err = svc.Update(ctx, p.ID, Input{CombineIceboxBacklog: &on}); err != nil || !got.CombineIceboxBacklog || !got.EstimateBugsAndChores {
+		t.Fatalf("combining icebox and backlog: %+v, %v", got, err)
+	}
 
 	for _, in := range []Input{
 		{Name: ptr(" ")},

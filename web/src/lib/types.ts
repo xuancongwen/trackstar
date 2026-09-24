@@ -45,6 +45,8 @@ export interface Project {
   velocity_window: number
   /** Bugs and chores may carry points (and count towards velocity). Off by default. */
   estimate_bugs_and_chores: boolean
+  /** View setting: the icebox is shown at the bottom of the backlog panel instead of in its own panel. */
+  combine_icebox_backlog: boolean
   /** Set while the project is archived: kept and readable, but nobody can change stories. */
   archived_at: string | null
   /** Present on GET /api/projects/:id: whether the caller may change things. */

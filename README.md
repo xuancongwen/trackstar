@@ -44,6 +44,9 @@ you land on the board:
 
 - **Icebox** – ideas. **Backlog** – prioritised work. **Current iteration** –
   what is being worked on now. **Done** (toggle) – accepted work by iteration.
+  The project setting *Combine icebox and backlog* shows the icebox at the
+  bottom of the backlog panel, under an *Icebox* divider, for a two-column
+  board; stories keep their section.
 - Drag rows to prioritise, or drag them between panels. Work that is in
   progress (started/finished/delivered/rejected) stays in the current iteration.
 - Each row has the one button that matters next: Start → Finish → Deliver →
