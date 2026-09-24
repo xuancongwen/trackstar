@@ -1,4 +1,4 @@
-// Phone layout (iPhone 13 emulation, touch): tabs, FAB, drawer "Move to",
+// Phone layout (iPhone 13 emulation, touch): tabs, FAB, editor "Move to",
 // hold-to-drag reorder, menu, and no horizontal overflow.
 import { KnownDevices } from 'puppeteer-core'
 import { apiClient, checker, launchBrowser, login, order, seed, sleep, startTrackstar, storyId } from './harness.mjs'
@@ -45,10 +45,10 @@ try {
   await sleep(400)
   t.eq('story created into icebox', (await order(page, 'icebox'))[0], 'Made on a phone')
 
-  // drawer: full width, Move to → Backlog
+  // editor expands under the tapped row, Move to → Backlog
   await page.tap(`[data-story-id="${await id('Made on a phone')}"] .title`)
-  await page.waitForSelector('.drawer')
-  t.eq('drawer fills the screen', await page.$eval('.drawer', (e) => Math.round(e.getBoundingClientRect().width) === window.innerWidth), true)
+  await page.waitForSelector('.editor')
+  t.eq('editor opens right below its row', await page.$eval('.editor', (e) => e.previousElementSibling?.classList.contains('story')), true)
   const targets = await page.$$eval('.move-targets button', (els) => els.map((b) => b.textContent))
   t.eq('move targets offered', targets, ['Backlog', 'Current iteration'])
   await page.evaluate(() => [...document.querySelectorAll('.move-targets button')].find((b) => b.textContent === 'Backlog').click())

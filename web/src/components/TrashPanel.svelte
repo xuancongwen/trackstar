@@ -1,13 +1,16 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte'
   import { formatDayTime } from '../lib/format'
   import type { Story } from '../lib/types'
 
   interface Props {
     stories: Story[]
+    openId?: number | null
+    editor?: Snippet<[Story]>
     onrestore: (story: Story) => void
     onopen: (story: Story) => void
   }
-  let { stories, onrestore, onopen }: Props = $props()
+  let { stories, openId = null, editor, onrestore, onopen }: Props = $props()
 </script>
 
 <section class="panel" aria-label="Deleted">
@@ -17,11 +20,12 @@
   </header>
   <div class="scroll">
     {#each stories as story (story.id)}
-      <div class="row">
+      <div class="row" class:open={story.id === openId}>
         <button class="link title" onclick={() => onopen(story)}>{story.title}</button>
         <span class="muted">{story.deleted_at ? formatDayTime(story.deleted_at) : ''}</span>
         <button onclick={() => onrestore(story)}>Restore</button>
       </div>
+      {#if story.id === openId}{@render editor?.(story)}{/if}
     {:else}
       <p class="muted">Nothing in the trash.</p>
     {/each}
@@ -71,6 +75,10 @@
     border-bottom: 1px solid var(--border);
     background: var(--row);
     font-size: 12px;
+    border-left: 3px solid transparent;
+  }
+  .row.open {
+    border-left-color: var(--accent);
   }
   .title {
     flex: 1;

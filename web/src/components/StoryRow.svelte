@@ -7,6 +7,8 @@
     story: Story
     users: Map<number, User>
     selected?: boolean
+    /** Expanded: the editor is rendered right below this row. */
+    open?: boolean
     busy?: boolean
     /** Just changed by someone else. */
     recent?: boolean
@@ -25,6 +27,7 @@
     story,
     users,
     selected = false,
+    open = false,
     busy = false,
     recent = false,
     checked = false,
@@ -46,6 +49,7 @@
 <div
   class="story {story.state}"
   class:selected
+  class:open
   class:recent
   class:checked
   class:locked={!canDrag(story) || readOnly}
@@ -180,6 +184,14 @@
   .story.selected {
     border-left-color: var(--accent);
     box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  /* Same wash as the editor below it, so row and editor read as one block. */
+  .story.open,
+  .story.open:hover {
+    background: color-mix(in srgb, var(--accent) 14%, var(--row));
+    border-left-color: var(--accent);
+    border-bottom-color: transparent;
+    box-shadow: none;
   }
   .grip {
     color: var(--muted);

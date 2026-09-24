@@ -206,7 +206,9 @@
   }
 </script>
 
-<aside class="drawer" aria-label="Story details">
+<!-- Expands in place under the story's row; data-no-drag keeps Sortable from
+     treating a drag that starts inside it as a row drag. -->
+<section class="editor" aria-label="Story details" data-no-drag>
   <header>
     <span class="muted">#{story.id} · {trashed ? 'deleted' : story.state}</span>
     <span class="spacer"></span>
@@ -225,7 +227,7 @@
         <button onclick={() => onpatch(story.id, { state: 'delivered' })} title="Admin: undo acceptance (affects velocity)">Reopen</button>
       {/if}
     {/if}
-    <button onclick={onclose} title="Close (Esc)" aria-label="Close">✕</button>
+    <button onclick={onclose} title="Collapse (Esc)" aria-label="Collapse">✕</button>
   </header>
 
   <div class="content">
@@ -418,38 +420,33 @@
       {/if}
     </footer>
   </div>
-</aside>
+</section>
 
 <style>
-  .drawer {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(460px, 100vw);
-    background: var(--panel);
-    border-left: 1px solid var(--border);
-    box-shadow: var(--shadow);
-    display: flex;
-    flex-direction: column;
-    z-index: 20;
+  .editor {
+    /* A light accent wash so the expanded editor stands out from the rows. */
+    background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+    border-left: 3px solid var(--accent);
+    border-bottom: 1px solid var(--border);
+    box-shadow: inset 0 1px 0 var(--accent);
+    cursor: default;
+    user-select: text;
   }
   header {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 8px 12px;
+    flex-wrap: wrap;
+    padding: 6px 10px;
     border-bottom: 1px solid var(--border);
   }
   .spacer {
     flex: 1;
   }
   .content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 12px;
+    padding: 10px;
     display: grid;
-    gap: 12px;
+    gap: 10px;
     align-content: start;
   }
   .title {
@@ -458,7 +455,7 @@
   }
   .grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
     gap: 8px;
   }
   .move-targets {
@@ -467,15 +464,8 @@
     flex-wrap: wrap;
   }
   @media (max-width: 600px) {
-    .drawer {
-      width: 100vw;
-      border-left: 0;
-    }
     .grid {
       grid-template-columns: 1fr;
-    }
-    header {
-      flex-wrap: wrap;
     }
   }
   select,
@@ -554,7 +544,7 @@
   article {
     padding: 6px 8px;
     margin-bottom: 2px;
-    background: var(--row);
+    background: color-mix(in srgb, var(--accent) 5%, var(--row));
     border: 1px solid var(--border);
     border-radius: 4px;
   }

@@ -54,8 +54,8 @@ try {
   t.eq('story created in A appears in B', true, true)
 
   // Deleting in A removes from B; A's undo brings it back in B.
-  await A.click(`${await sel(A, 'Live-created story')} .title`); await A.waitForSelector('.drawer')
-  await A.click('.drawer footer button.danger'); await A.click('.drawer footer button.danger'); await sleep(600)
+  await A.click(`${await sel(A, 'Live-created story')} .title`); await A.waitForSelector('.editor')
+  await A.click('.editor footer button.danger'); await A.click('.editor footer button.danger'); await sleep(600)
   t.eq('deletion propagates', (await order(B, 'backlog')).includes('Live-created story'), false)
   await A.click('.undo button'); await sleep(600)
   t.eq('undo propagates', (await order(B, 'backlog')).includes('Live-created story'), true)

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte'
   import { formatRange } from '../lib/format'
   import { totalPoints } from '../lib/board'
   import type { Iteration, Story, StoryState, User } from '../lib/types'
@@ -10,10 +11,12 @@
     stories: Story[]
     users: Map<number, User>
     selectedId: number | null
+    openId?: number | null
+    editor?: Snippet<[Story]>
     velocity: number | null
     onopen: (story: Story) => void
   }
-  let { iterations, stories, users, selectedId, velocity, onopen }: Props = $props()
+  let { iterations, stories, users, selectedId, openId = null, editor, velocity, onopen }: Props = $props()
 
   const PAGE = 5
   let shown = $state(PAGE)
@@ -45,7 +48,8 @@
         <span>{group.iteration.points} pts</span>
       </div>
       {#each group.stories as story (story.id)}
-        <StoryRow {story} {users} selected={story.id === selectedId} {onopen} onaction={noop} onestimate={noop} />
+        <StoryRow {story} {users} selected={story.id === selectedId} open={story.id === openId} {onopen} onaction={noop} onestimate={noop} />
+        {#if story.id === openId}{@render editor?.(story)}{/if}
       {/each}
     {:else}
       <p class="muted">No completed iterations yet.</p>

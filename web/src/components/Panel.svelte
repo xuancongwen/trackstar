@@ -12,6 +12,9 @@
     rows: BacklogRow[]
     users: Map<number, User>
     selectedId: number | null
+    /** The story expanded in place; `editor` renders under its row. */
+    openId?: number | null
+    editor?: Snippet<[Story]>
     busyIds: Set<number>
     recentIds?: Set<number>
     checkedIds?: Set<number>
@@ -43,6 +46,8 @@
     rows,
     users,
     selectedId,
+    openId = null,
+    editor,
     busyIds,
     recentIds = new Set(),
     checkedIds = new Set(),
@@ -114,6 +119,7 @@
           story={row.story}
           {users}
           selected={row.story.id === selectedId}
+          open={row.story.id === openId}
           busy={busyIds.has(row.story.id)}
           recent={recentIds.has(row.story.id)}
           checked={checkedIds.has(row.story.id)}
@@ -124,6 +130,7 @@
           {onaction}
           {onestimate}
         />
+        {#if row.story.id === openId}{@render editor?.(row.story)}{/if}
       {/if}
     {/each}
     {#if count === 0}

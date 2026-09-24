@@ -27,7 +27,7 @@
   import Panel from './Panel.svelte'
   import ProjectSettings from './ProjectSettings.svelte'
   import QuickCreate from './QuickCreate.svelte'
-  import StoryDrawer from './StoryDrawer.svelte'
+  import StoryEditor from './StoryEditor.svelte'
   import StoryRow from './StoryRow.svelte'
 
   interface Props {
@@ -51,6 +51,7 @@
   let iterations = $state<Iteration[]>([])
 
   let selectedId = $state<number | null>(null)
+  // The story expanded in place under its row (one at a time).
   let openId = $state<number | null>(null)
   let creating = $state<DropSection | null>(null)
   let showSettings = $state(false)
@@ -526,7 +527,7 @@
         break
       case 'Enter':
         if (selectedId === null) return
-        openId = selectedId
+        openId = openId === selectedId ? null : selectedId
         break
       case '/':
         searchInput?.focus()
@@ -540,9 +541,10 @@
     event.preventDefault()
   }
 
+  // Click expands the row; clicking the expanded row again collapses it.
   const openStoryRow = (story: Story) => {
     selectedId = story.id
-    openId = story.id
+    openId = openId === story.id ? null : story.id
   }
   const creatingSection = (): DropSection => {
     if (mobile && (mobileTab === 'icebox' || mobileTab === 'backlog' || mobileTab === 'current')) return mobileTab
@@ -695,10 +697,10 @@
         <EpicsPanel projectId={project.id} {epics} active={activeEpic} canWrite={!readOnly} onchanged={loadEpics} onselect={(n) => (activeEpic = n)} />
       {/if}
       {#if mobile ? mobileTab === 'done' : showDone}
-        <DonePanel {iterations} stories={doneStories} {users} {selectedId} velocity={velocity?.velocity ?? null} onopen={openStoryRow} />
+        <DonePanel {iterations} stories={doneStories} {users} {selectedId} {openId} {editor} velocity={velocity?.velocity ?? null} onopen={openStoryRow} />
       {/if}
       {#if mobile ? mobileTab === 'trash' : showTrash}
-        <TrashPanel stories={trashStories} onrestore={(s) => restoreStory(s.id)} onopen={openStoryRow} />
+        <TrashPanel stories={trashStories} {openId} {editor} onrestore={(s) => restoreStory(s.id)} onopen={openStoryRow} />
       {/if}
       {#each panelSections.filter((s) => !mobile || s === mobileTab) as section (section)}
         <Panel
@@ -707,6 +709,8 @@
           sub={combineIcebox && section === 'backlog' ? { section: 'icebox', rows: rows.icebox, summary: summaries.icebox } : undefined}
           {users}
           {selectedId}
+          {openId}
+          {editor}
           {busyIds}
           {recentIds}
           checkedIds={checked}
@@ -741,13 +745,15 @@
       </div>
     {/if}
     {#each accepted as story (story.id)}
-      <StoryRow {story} {users} {epicNames} {readOnly} selected={story.id === selectedId} onopen={openStoryRow} onaction={act} onestimate={estimate} />
+      <StoryRow {story} {users} {epicNames} {readOnly} selected={story.id === selectedId} open={story.id === openId} onopen={openStoryRow} onaction={act} onestimate={estimate} />
+      {#if story.id === openId}{@render editor(story)}{/if}
     {/each}
   {/snippet}
 
-  {#if openStory}
-    <StoryDrawer
-      story={openStory}
+  <!-- Rendered by each panel right under the open story's row. -->
+  {#snippet editor(story: Story)}
+    <StoryEditor
+      {story}
       {users}
       me={user}
       {stories}
@@ -760,7 +766,7 @@
       oncommented={commentCountChanged}
       onclose={() => (openId = null)}
     />
-  {/if}
+  {/snippet}
   {#if creating}
     <QuickCreate section={creating} {project} oncreate={createStory} onclose={() => (creating = null)} />
   {/if}
@@ -791,7 +797,7 @@
   {/if}
   {#if showHelp}
     <div class="help" role="note">
-      <kbd>c</kbd> new story · <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>h</kbd>/<kbd>l</kbd> switch panel · <kbd>Enter</kbd> open ·
+      <kbd>c</kbd> new story · <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>h</kbd>/<kbd>l</kbd> switch panel · <kbd>Enter</kbd> expand/collapse ·
       <kbd>x</kbd> / <kbd>Shift</kbd>-click select · <kbd>Shift</kbd>+<kbd>I</kbd>/<kbd>B</kbd>/<kbd>C</kbd> move selection to Icebox/Backlog/Current ·
       <kbd>e</kbd> epics · <kbd>/</kbd> filter · <kbd>Esc</kbd> close
     </div>

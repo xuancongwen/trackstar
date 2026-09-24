@@ -42,11 +42,11 @@ try {
   // --- keyboard
   await page.keyboard.press('j'); await page.keyboard.press('l'); await page.keyboard.press('j')
   t.eq('j/l/j selects second backlog row', await page.$eval('.story.selected .title', (e) => e.textContent), 'Story drag and drop')
-  await page.keyboard.press('Enter'); await page.waitForSelector('.drawer')
+  await page.keyboard.press('Enter'); await page.waitForSelector('.editor')
   await page.waitForSelector('.timeline .event')
-  t.eq('drawer shows creation activity', await page.$eval('.timeline .event', (e) => e.textContent.includes('created the story')), true)
+  t.eq('editor shows creation activity', await page.$eval('.timeline .event', (e) => e.textContent.includes('created the story')), true)
   await page.keyboard.press('Escape')
-  t.eq('esc closes drawer', (await page.$('.drawer')) === null, true)
+  t.eq('esc closes editor', (await page.$('.editor')) === null, true)
   await page.keyboard.press('c'); await page.waitForSelector('form[aria-label="New story"]')
   await page.keyboard.type('Created from keyboard'); await page.keyboard.press('Enter'); await sleep(400)
   t.eq('c + Enter creates in the selected panel', await order(page, 'backlog').then((o) => o.at(-1)), 'Created from keyboard')
@@ -69,14 +69,14 @@ try {
 
   // --- trash and undo
   const victim = await id('Email notifications')
-  await page.click(`${sel(victim)} .title`); await page.waitForSelector('.drawer')
-  await page.click('.drawer footer button.danger'); await page.click('.drawer footer button.danger'); await sleep(400)
+  await page.click(`${sel(victim)} .title`); await page.waitForSelector('.editor')
+  await page.click('.editor footer button.danger'); await page.click('.editor footer button.danger'); await sleep(400)
   t.eq('deleted story leaves the board', (await order(page, 'backlog')).includes('Email notifications'), false)
   t.eq('undo offered', await page.$eval('.undo', (e) => e.textContent.includes('Email notifications')), true)
   await page.click('.undo button'); await sleep(400)
   t.eq('undo restores at the bottom', await order(page, 'backlog').then((o) => o.at(-1)), 'Email notifications')
-  await page.click(`${sel(victim)} .title`); await page.waitForSelector('.drawer')
-  await page.click('.drawer footer button.danger'); await page.click('.drawer footer button.danger'); await sleep(400)
+  await page.click(`${sel(victim)} .title`); await page.waitForSelector('.editor')
+  await page.click('.editor footer button.danger'); await page.click('.editor footer button.danger'); await sleep(400)
   await page.click('header.topbar button[title="Deleted stories"]'); await page.waitForSelector('section[aria-label="Deleted"]')
   t.eq('trash panel lists it', await page.$$eval('section[aria-label="Deleted"] .title', (els) => els.map((e) => e.textContent)), ['Email notifications'])
   await page.click('section[aria-label="Deleted"] .row > button:not(.link)'); await sleep(400)
@@ -137,6 +137,9 @@ try {
   t.eq('current project is marked', await page.$eval('.switcher-items .current', (e) => e.textContent.trim()), 'Apollo')
   await page.click('.switcher-items [role="option"]:last-of-type')
   await page.waitForFunction((slug) => location.hash === `#/p/${slug}`, {}, zephyr.slug)
+  // The board remounts on a slug change; wait for the new one to have loaded
+  // its project (it sets the title) rather than for the old one's live dot.
+  await page.waitForFunction(() => document.title.startsWith('Zephyr'))
   await page.waitForSelector('.live.live')
   t.eq('switching opens the other board', await page.$eval('.switcher > button strong', (e) => e.textContent.trim()), 'Zephyr')
   t.eq('switcher closed after picking', await page.$('.switcher-items'), null)
