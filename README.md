@@ -503,6 +503,9 @@ frontend and a Linux binary for the remote architecture, uploads it, snapshots
 the database, stops the service, swaps the binary atomically, starts (migrating
 on startup), verifies `/health`, and rolls back on failure. It never touches
 `/etc/trackstar/trackstar.env`. Non-root SSH users need passwordless sudo.
+To skip typing the host, copy `deploy/deploy.env.example` to `deploy/deploy.env`
+(gitignored, never uploaded), set `DEPLOY_TARGET=user@host.lan`, and run
+`./scripts/deploy.sh` with no target.
 
 ## API
 

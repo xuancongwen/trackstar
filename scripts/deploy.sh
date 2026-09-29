@@ -2,6 +2,7 @@
 # Build locally and deploy to a host over SSH.
 #
 #   ./scripts/deploy.sh root@192.168.1.240
+#   ./scripts/deploy.sh                    (target from DEPLOY_TARGET in deploy/deploy.env)
 #   ./scripts/deploy.sh --skip-build deploy@track.example.com      (needs passwordless sudo)
 #   ./scripts/deploy.sh root@new-host -- --public-url https://track.example.com/
 #
@@ -21,16 +22,22 @@ die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --skip-build) SKIP_BUILD=1; shift ;;
-    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     --) shift; SETUP_ARGS=("$@"); break ;;
     -*) die "unknown option: $1" ;;
     *) [ -z "$TARGET" ] || die "only one target host may be given"; TARGET=$1; shift ;;
   esac
 done
-[ -n "$TARGET" ] || die "usage: deploy.sh [--skip-build] user@host [-- setup.sh options]"
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
+
+if [ -z "$TARGET" ] && [ -f deploy/deploy.env ]; then
+  # shellcheck source=/dev/null
+  . deploy/deploy.env
+  TARGET=${DEPLOY_TARGET:-}
+fi
+[ -n "$TARGET" ] || die "usage: deploy.sh [--skip-build] [user@host] [-- setup.sh options]  (or set DEPLOY_TARGET in deploy/deploy.env)"
 
 SSH_OPTS=(-o ConnectTimeout=10 -o ControlMaster=auto -o ControlPersist=60 -o "ControlPath=/tmp/trackstar-deploy-%C")
 remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
@@ -67,7 +74,7 @@ log "Uploading"
 STAGE=$(remote 'mktemp -d /tmp/trackstar-deploy.XXXXXX')
 # shellcheck disable=SC2064
 trap "ssh ${SSH_OPTS[*]} $TARGET 'rm -rf $STAGE' >/dev/null 2>&1 || true" EXIT
-tar -C "$ROOT_DIR" -czf - scripts deploy -C "$(dirname "$OUT")" "$(basename "$OUT")" \
+tar -C "$ROOT_DIR" --exclude=deploy/deploy.env -czf - scripts deploy -C "$(dirname "$OUT")" "$(basename "$OUT")" \
   | remote "tar -xzf - --no-same-owner -C '$STAGE' && mv '$STAGE/$(basename "$OUT")' '$STAGE/trackstar'"
 
 if ! remote "test -f /etc/trackstar/trackstar.env && test -x /usr/local/bin/trackstar"; then

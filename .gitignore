@@ -13,6 +13,7 @@
 *.db-wal
 .env
 trackstar.env
+/deploy/deploy.env
 
 # tooling
 .DS_Store

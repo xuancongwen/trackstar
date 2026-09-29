@@ -73,7 +73,7 @@ release: frontend
 		echo "building $$name"; \
 		mkdir -p dist/$$name && \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/$$name/trackstar ./cmd/trackstar && \
-		cp -r scripts deploy README.md dist/$$name/ && \
+		cp -r scripts deploy README.md dist/$$name/ && rm -f dist/$$name/deploy/deploy.env && \
 		tar -C dist --owner=0 --group=0 -czf dist/$$name.tar.gz $$name && rm -rf dist/$$name || exit 1; \
 	done
 	@cd dist && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS
