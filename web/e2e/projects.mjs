@@ -67,6 +67,28 @@ try {
   ])
   t.eq('a comment shows what was said', await page.$eval('.feed .quote', (e) => e.textContent.startsWith('Check the wording.') && e.textContent.endsWith('…')), true)
   t.eq('nothing from a project Sam cannot see', await page.$eval('main', (e) => e.innerText.includes("Kim's own") || e.innerText.includes('Not for Sam')), false)
+
+  // The account menu is on this page too, not only on a board.
+  const menuItems = async (p) => {
+    await p.click('header .menu > button')
+    return p.$$eval('header [role="menuitem"]', (els) => els.map((e) => e.textContent))
+  }
+  t.eq('the menu offers the account and signing out', await menuItems(page), ['Account…', 'Sign out'])
+  await page.keyboard.press('Escape')
+  t.eq('Esc closes the menu', await page.$('header .menu-items'), null)
+  await menuItems(page)
+  await page.click('header [role="menuitem"]')
+  await page.waitForSelector('form[aria-label="Account"]')
+  const nameInput = 'form[aria-label="Account"] label.field input'
+  await page.$eval(nameInput, (e) => (e.focus(), e.select()))
+  await page.type(nameInput, 'Samantha')
+  await page.click('form[aria-label="Account"] button.primary')
+  await page.waitForFunction(() => document.querySelector('header .who').textContent === 'Samantha')
+  t.eq('a new display name reaches the feed', await page.$eval('.feed .what strong', (e) => e.textContent), 'Samantha')
+  await page.keyboard.press('Escape')
+  t.eq('Esc closes the account dialog', await page.$('form[aria-label="Account"]'), null)
+  await api('PATCH', '/api/me', { display_name: 'Sam' })
+
   await page.click('.feed li a')
   await page.waitForSelector('[data-story-id]')
   t.eq('a feed entry opens its project', await page.evaluate(() => location.hash), '#/p/apollo')
@@ -83,6 +105,14 @@ try {
       return [document.documentElement.scrollWidth <= window.innerWidth, spills.length, small.length]
     })
     t.eq(`${device}: no sideways scroll, nothing off screen, no zooming input`, fit, [true, 0, 0])
+    await phone.click('header .menu > button')
+    await phone.click('header [role="menuitem"]')
+    await phone.waitForSelector('form[aria-label="Account"]')
+    const reach = await phone.$eval('form[aria-label="Account"]', (f) => {
+      const b = f.getBoundingClientRect()
+      return [b.left >= 0 && b.right <= window.innerWidth, f.scrollWidth <= f.clientWidth]
+    })
+    t.eq(`${device}: the account dialog opens and fits`, reach, [true, true])
     await phone.close()
   }
 } finally {

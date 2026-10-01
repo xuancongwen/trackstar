@@ -4,8 +4,14 @@
   import { feedPhrase, foldCreated, withoutEchoes, type FeedLine } from '../lib/activity'
   import { timeAgo } from '../lib/format'
   import type { Project, ProjectStats, User } from '../lib/types'
+  import AccountDialog from './AccountDialog.svelte'
+  import UsersDialog from './UsersDialog.svelte'
 
-  let { user, onlogout }: { user: User; onlogout: () => void } = $props()
+  let { user, onlogout, onuserchanged }: { user: User; onlogout: () => void; onuserchanged: (user: User) => void } = $props()
+
+  let menuOpen = $state(false)
+  let showAccount = $state(false)
+  let showUsers = $state(false)
 
   let projects = $state<Project[]>([])
   let active = $derived(projects.filter((p) => !p.archived_at))
@@ -19,7 +25,8 @@
   let stats = $state(new Map<number, ProjectStats>())
   const FEED_LINES = 20
   let feed = $state<FeedLine[]>([])
-  let users = $state(new Map<number, User>())
+  let userList = $state<User[]>([])
+  let users = $derived(new Map(userList.map((u) => [u.id, u])))
   let projectsById = $derived(new Map(projects.map((p) => [p.id, p])))
   const userName = (id: string | number) => users.get(Number(id))?.display_name ?? 'Someone'
 
@@ -27,7 +34,7 @@
     const overview = Promise.all([api.overview(), api.users()])
       .then(([o, us]) => {
         stats = new Map(o.projects.map((s) => [s.project_id, s]))
-        users = new Map(us.map((u) => [u.id, u]))
+        userList = us
         feed = foldCreated(withoutEchoes(o.activity)).slice(0, FEED_LINES)
       })
       .catch(() => {})
@@ -63,13 +70,44 @@
       error = (err as Error).message
     }
   }
+
+  /** The feed names people, so a changed display name has to reach it too. */
+  function accountSaved(u: User) {
+    onuserchanged(u)
+    userList = userList.map((x) => (x.id === u.id ? u : x))
+  }
+
+  function onKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Escape') return
+    if (menuOpen) menuOpen = false
+    else if (showAccount) showAccount = false
+    else if (showUsers) showUsers = false
+    else return
+    event.preventDefault()
+  }
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <header>
   <strong>Trackstar</strong>
   <span class="spacer"></span>
-  <span class="muted">{user.display_name}</span>
-  <button onclick={onlogout}>Sign out</button>
+  <div class="menu">
+    <button class:on={menuOpen} onclick={() => (menuOpen = !menuOpen)} aria-haspopup="menu" aria-expanded={menuOpen} aria-label="Menu">
+      <span class="who">{user.display_name}</span> ▾
+    </button>
+    {#if menuOpen}
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+      <div class="menu-backdrop" onclick={() => (menuOpen = false)}></div>
+      <div class="menu-items" role="menu">
+        <button role="menuitem" onclick={() => ((showAccount = true), (menuOpen = false))}>Account…</button>
+        {#if user.is_admin}
+          <button role="menuitem" onclick={() => ((showUsers = true), (menuOpen = false))}>Users…</button>
+        {/if}
+        <button role="menuitem" onclick={onlogout}>Sign out</button>
+      </div>
+    {/if}
+  </div>
 </header>
 
 <main>
@@ -139,6 +177,13 @@
   {/if}
 </main>
 
+{#if showAccount}
+  <AccountDialog {user} onsaved={accountSaved} onclose={() => (showAccount = false)} />
+{/if}
+{#if showUsers}
+  <UsersDialog me={user} users={userList} onchanged={(list) => (userList = list)} onclose={() => (showUsers = false)} />
+{/if}
+
 <style>
   header {
     display: flex;
@@ -148,12 +193,57 @@
     background: var(--panel-head);
     color: var(--panel-head-text);
   }
-  header .muted {
-    color: inherit;
-    opacity: 0.75;
-  }
   .spacer {
     flex: 1;
+  }
+  .menu {
+    position: relative;
+    min-width: 0;
+  }
+  .menu > button {
+    display: inline-flex;
+    gap: 4px;
+    max-width: 100%;
+    background: transparent;
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+  .menu > button.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+  }
+  .who {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 25;
+  }
+  .menu-items {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 26;
+    display: grid;
+    min-width: 150px;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+    padding: 4px;
+  }
+  .menu-items button {
+    text-align: left;
+    border: 0;
+    color: var(--text);
+    padding: 6px 10px;
+  }
+  .menu-items button:hover {
+    background: var(--row-hover);
   }
   main {
     max-width: 560px;

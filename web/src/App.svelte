@@ -59,7 +59,7 @@
     <Board {slug} {user} onlogout={logout} onunauthorized={() => (user = null)} onuserchanged={(u) => (user = u)} />
   {/key}
 {:else}
-  <Projects {user} onlogout={logout} />
+  <Projects {user} onlogout={logout} onuserchanged={(u) => (user = u)} />
 {/if}
 
 <style>
