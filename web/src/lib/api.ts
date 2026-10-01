@@ -14,6 +14,7 @@ import type {
   MoveRequest,
   MoveResult,
   NewStory,
+  Overview,
   Project,
   Story,
   StoryDetail,
@@ -77,6 +78,7 @@ export const api = {
   setUserPassword: (id: number, password: string) => request<void>('POST', `/api/users/${id}/password`, { password }),
 
   projects: () => request<Project[]>('GET', '/api/projects'),
+  overview: () => request<Overview>('GET', '/api/overview'),
   project: (ref: string | number) => request<Project>('GET', `/api/projects/${ref}`),
   createProject: (input: Partial<Project>) => request<Project>('POST', '/api/projects', input),
   updateProject: (id: number, input: Partial<Project>) => request<Project>('PATCH', `/api/projects/${id}`, input),

@@ -112,3 +112,47 @@ VALUES (sqlc.arg(story_id), sqlc.arg(user_id), sqlc.arg(kind), sqlc.arg(old_valu
 
 -- name: ListActivity :many
 SELECT * FROM activity WHERE story_id = sqlc.arg(story_id) ORDER BY id;
+
+-- Per project: stories being worked on, stories delivered and waiting for
+-- acceptance, and when a story last changed (trashed stories count for the
+-- time only).
+-- name: ProjectStoryStats :many
+SELECT project_id,
+       CAST(COALESCE(SUM(CASE WHEN deleted_at IS NULL AND state IN ('started', 'finished', 'rejected') THEN 1 ELSE 0 END), 0) AS INTEGER) AS in_progress,
+       CAST(COALESCE(SUM(CASE WHEN deleted_at IS NULL AND state = 'delivered' THEN 1 ELSE 0 END), 0) AS INTEGER) AS to_accept,
+       CAST(MAX(updated_at) AS INTEGER) AS last_changed_at
+FROM stories
+WHERE project_id IN (sqlc.slice(project_ids))
+GROUP BY project_id;
+
+-- A comment does not touch its story's updated_at.
+-- name: ProjectLastComment :many
+SELECT stories.project_id, CAST(MAX(comments.created_at) AS INTEGER) AS last_comment_at
+FROM comments
+JOIN stories ON stories.id = comments.story_id
+WHERE stories.project_id IN (sqlc.slice(project_ids))
+GROUP BY stories.project_id;
+
+-- Newest first across projects. Renames and type changes are edits, not news.
+-- The limit (story.FeedSize) is a literal here and in RecentComments: sqlc
+-- numbers a parameter that follows a slice as if the slice were one value,
+-- so a bound limit would read one of the project ids instead.
+-- name: RecentActivity :many
+SELECT activity.id, activity.kind, activity.old_value, activity.new_value, activity.created_at, activity.user_id,
+       stories.id AS story_id, stories.title AS story_title, stories.project_id
+FROM activity
+JOIN stories ON stories.id = activity.story_id
+WHERE stories.project_id IN (sqlc.slice(project_ids))
+  AND activity.kind NOT IN ('title', 'type')
+ORDER BY activity.id DESC
+LIMIT 60;
+
+-- name: RecentComments :many
+SELECT comments.id, comments.body, comments.created_at, comments.user_id,
+       stories.id AS story_id, stories.title AS story_title, stories.project_id
+FROM comments
+JOIN stories ON stories.id = comments.story_id
+WHERE stories.project_id IN (sqlc.slice(project_ids))
+  AND stories.deleted_at IS NULL
+ORDER BY comments.id DESC
+LIMIT 60;

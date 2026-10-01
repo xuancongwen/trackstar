@@ -19,6 +19,16 @@ export function formatRange(startAt: string, endAt: string): string {
   return `${formatDay(startAt)} – ${formatDay(new Date(new Date(endAt).getTime() - 1000))}`
 }
 
+/** "just now", "5m ago", "3h ago", "2d ago", then the date once it is over a month old. */
+export function timeAgo(value: string | Date, now: Date = new Date()): string {
+  const seconds = Math.max(0, (now.getTime() - new Date(value).getTime()) / 1000)
+  if (seconds < 60) return 'just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
+  if (seconds < 30 * 86400) return `${Math.floor(seconds / 86400)}d ago`
+  return formatDay(value)
+}
+
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 export function initials(name: string): string {

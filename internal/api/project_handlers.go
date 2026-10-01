@@ -16,6 +16,37 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, projects)
 }
 
+// handleOverview is what the projects page shows besides the list itself:
+// per-project counts and a feed of recent activity, limited to the projects
+// the caller can see. Archived projects keep their counts but stay out of
+// the feed: nothing new happens in them.
+func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r.Context())
+	projects, err := s.Projects.ListVisible(r.Context(), u.ID, u.IsAdmin)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	var all, live []int64
+	for _, p := range projects {
+		all = append(all, p.ID)
+		if !p.Archived() {
+			live = append(live, p.ID)
+		}
+	}
+	stats, err := s.Stories.ProjectStats(r.Context(), all)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	feed, err := s.Stories.RecentActivity(r.Context(), live)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"projects": stats, "activity": feed})
+}
+
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	var in project.Input
 	if err := decode(w, r, &in); err != nil {

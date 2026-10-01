@@ -533,6 +533,111 @@ func (q *Queries) ListSectionPositions(ctx context.Context, arg ListSectionPosit
 	return items, nil
 }
 
+const projectLastComment = `-- name: ProjectLastComment :many
+SELECT stories.project_id, CAST(MAX(comments.created_at) AS INTEGER) AS last_comment_at
+FROM comments
+JOIN stories ON stories.id = comments.story_id
+WHERE stories.project_id IN (/*SLICE:project_ids*/?)
+GROUP BY stories.project_id
+`
+
+type ProjectLastCommentRow struct {
+	ProjectID     int64
+	LastCommentAt int64
+}
+
+// A comment does not touch its story's updated_at.
+func (q *Queries) ProjectLastComment(ctx context.Context, projectIds []int64) ([]ProjectLastCommentRow, error) {
+	query := projectLastComment
+	var queryParams []interface{}
+	if len(projectIds) > 0 {
+		for _, v := range projectIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:project_ids*/?", strings.Repeat(",?", len(projectIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:project_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProjectLastCommentRow{}
+	for rows.Next() {
+		var i ProjectLastCommentRow
+		if err := rows.Scan(&i.ProjectID, &i.LastCommentAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const projectStoryStats = `-- name: ProjectStoryStats :many
+SELECT project_id,
+       CAST(COALESCE(SUM(CASE WHEN deleted_at IS NULL AND state IN ('started', 'finished', 'rejected') THEN 1 ELSE 0 END), 0) AS INTEGER) AS in_progress,
+       CAST(COALESCE(SUM(CASE WHEN deleted_at IS NULL AND state = 'delivered' THEN 1 ELSE 0 END), 0) AS INTEGER) AS to_accept,
+       CAST(MAX(updated_at) AS INTEGER) AS last_changed_at
+FROM stories
+WHERE project_id IN (/*SLICE:project_ids*/?)
+GROUP BY project_id
+`
+
+type ProjectStoryStatsRow struct {
+	ProjectID     int64
+	InProgress    int64
+	ToAccept      int64
+	LastChangedAt int64
+}
+
+// Per project: stories being worked on, stories delivered and waiting for
+// acceptance, and when a story last changed (trashed stories count for the
+// time only).
+func (q *Queries) ProjectStoryStats(ctx context.Context, projectIds []int64) ([]ProjectStoryStatsRow, error) {
+	query := projectStoryStats
+	var queryParams []interface{}
+	if len(projectIds) > 0 {
+		for _, v := range projectIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:project_ids*/?", strings.Repeat(",?", len(projectIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:project_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProjectStoryStatsRow{}
+	for rows.Next() {
+		var i ProjectStoryStatsRow
+		if err := rows.Scan(
+			&i.ProjectID,
+			&i.InProgress,
+			&i.ToAccept,
+			&i.LastChangedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const purgeDeletedStories = `-- name: PurgeDeletedStories :execrows
 DELETE FROM stories WHERE deleted_at IS NOT NULL AND deleted_at < ?1
 `
@@ -543,6 +648,138 @@ func (q *Queries) PurgeDeletedStories(ctx context.Context, before sql.NullInt64)
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const recentActivity = `-- name: RecentActivity :many
+SELECT activity.id, activity.kind, activity.old_value, activity.new_value, activity.created_at, activity.user_id,
+       stories.id AS story_id, stories.title AS story_title, stories.project_id
+FROM activity
+JOIN stories ON stories.id = activity.story_id
+WHERE stories.project_id IN (/*SLICE:project_ids*/?)
+  AND activity.kind NOT IN ('title', 'type')
+ORDER BY activity.id DESC
+LIMIT 60
+`
+
+type RecentActivityRow struct {
+	ID         int64
+	Kind       string
+	OldValue   string
+	NewValue   string
+	CreatedAt  int64
+	UserID     int64
+	StoryID    int64
+	StoryTitle string
+	ProjectID  int64
+}
+
+// Newest first across projects. Renames and type changes are edits, not news.
+// The limit (story.FeedSize) is a literal here and in RecentComments: sqlc
+// numbers a parameter that follows a slice as if the slice were one value,
+// so a bound limit would read one of the project ids instead.
+func (q *Queries) RecentActivity(ctx context.Context, projectIds []int64) ([]RecentActivityRow, error) {
+	query := recentActivity
+	var queryParams []interface{}
+	if len(projectIds) > 0 {
+		for _, v := range projectIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:project_ids*/?", strings.Repeat(",?", len(projectIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:project_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RecentActivityRow{}
+	for rows.Next() {
+		var i RecentActivityRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.OldValue,
+			&i.NewValue,
+			&i.CreatedAt,
+			&i.UserID,
+			&i.StoryID,
+			&i.StoryTitle,
+			&i.ProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const recentComments = `-- name: RecentComments :many
+SELECT comments.id, comments.body, comments.created_at, comments.user_id,
+       stories.id AS story_id, stories.title AS story_title, stories.project_id
+FROM comments
+JOIN stories ON stories.id = comments.story_id
+WHERE stories.project_id IN (/*SLICE:project_ids*/?)
+  AND stories.deleted_at IS NULL
+ORDER BY comments.id DESC
+LIMIT 60
+`
+
+type RecentCommentsRow struct {
+	ID         int64
+	Body       string
+	CreatedAt  int64
+	UserID     int64
+	StoryID    int64
+	StoryTitle string
+	ProjectID  int64
+}
+
+func (q *Queries) RecentComments(ctx context.Context, projectIds []int64) ([]RecentCommentsRow, error) {
+	query := recentComments
+	var queryParams []interface{}
+	if len(projectIds) > 0 {
+		for _, v := range projectIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:project_ids*/?", strings.Repeat(",?", len(projectIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:project_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RecentCommentsRow{}
+	for rows.Next() {
+		var i RecentCommentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Body,
+			&i.CreatedAt,
+			&i.UserID,
+			&i.StoryID,
+			&i.StoryTitle,
+			&i.ProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const searchStories = `-- name: SearchStories :many

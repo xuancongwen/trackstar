@@ -39,8 +39,11 @@ Source: <https://github.com/xuancongwen/trackstar> · MIT licensed.
 
 ## Using it
 
-The first account you register becomes the administrator. Create a project and
-you land on the board:
+The first account you register becomes the administrator. The projects page
+lists your projects with what is going on in each (stories in progress,
+stories delivered and waiting to be accepted, when it was last active) and,
+below, the recent activity across them: who started, finished, estimated or
+commented on what. Create a project and you land on the board:
 
 - **Icebox** – ideas. **Backlog** – prioritised work. **Current iteration** –
   what is being worked on now. **Done** (toggle) – accepted work by iteration.
@@ -238,7 +241,9 @@ row's workflow buttons. `make e2e` drives the real binary in headless
 Chromium: drag/drop (rows and empty column space), keyboard, workflow buttons,
 search, trash/undo, the account dialog, — with two browsers — live sync, and
 (with iPhone emulation and touch input) the phone layout: tabs, FAB, drawer
-"Move to", hold-to-drag reordering.
+"Move to", hold-to-drag reordering, and that nothing scrolls sideways, zooms
+on focus or ends up out of reach at 390px, 320px and in landscape. It also
+covers the OAuth flow and the projects page.
 
 CI (`.github/workflows/ci.yml`) runs all of that plus a check that
 `internal/database/dbgen` matches `db/queries`, and builds the Docker image
@@ -532,6 +537,7 @@ GET    /api/me/grants     DELETE /api/me/grants/:id   (session; apps connected t
 GET    /api/users         PATCH /api/users/:id {display_name, is_admin, is_active}   POST /api/users/:id/password   (admin, session)
 GET    /api/config
 GET    /api/projects      POST /api/projects
+GET    /api/overview      {projects: [{project_id, in_progress, to_accept, last_activity_at}], activity: [newest story changes and comments]}   (the projects page)
 GET    /api/projects/:id  PATCH … DELETE …       (:id may be the numeric id or the slug; DELETE removes every story with it)
                           PATCH {name, description, iteration_length_days, iteration_start_weekday, velocity_window, estimate_bugs_and_chores}
 POST   /api/projects/:id/archive     DELETE …    (archive = read-only for everyone; owners and admins)

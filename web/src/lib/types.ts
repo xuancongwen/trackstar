@@ -151,6 +151,36 @@ export interface Activity {
   created_at: string
 }
 
+/** What the projects page shows about one project. */
+export interface ProjectStats {
+  project_id: number
+  /** Started, finished and rejected stories. */
+  in_progress: number
+  /** Delivered stories waiting for a decision. */
+  to_accept: number
+  last_activity_at: string | null
+}
+
+/** One line of the cross-project feed: a story change (an Activity kind) or a comment. */
+export interface FeedEntry {
+  id: number
+  kind: Activity['kind'] | 'comment'
+  project_id: number
+  story_id: number
+  story_title: string
+  user_id: number
+  old_value: string
+  new_value: string
+  /** Comments only. */
+  body?: string
+  created_at: string
+}
+
+export interface Overview {
+  projects: ProjectStats[]
+  activity: FeedEntry[]
+}
+
 export interface Comment {
   id: number
   story_id: number
