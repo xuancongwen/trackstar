@@ -733,7 +733,8 @@
     </main>
   </div>
 
-  {#if mobile && !readOnly && !openStory && !creating}
+  <!-- Not on the epics tab, where it would sit on top of the Add button. -->
+  {#if mobile && !readOnly && !openStory && !creating && mobileTab !== 'epics'}
     <button class="fab" onclick={() => (creating = creatingSection())} aria-label="New story">+</button>
   {/if}
 

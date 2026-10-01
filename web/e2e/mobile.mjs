@@ -100,6 +100,96 @@ try {
   await tab('Epics')
   t.eq('epics tab', await page.$eval('section[aria-label="Epics"]', (e) => e !== null), true)
   t.eq('still no horizontal overflow', await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  t.eq('no floating + on top of the epics form', await page.$('.fab'), null)
+
+  // Nothing pans, zooms or hides unless the user means it to. Checked on the
+  // open dialog (if any) and the page: no sideways scrolling, nothing spilling
+  // out of a dialog, and no field small enough to make iOS zoom on focus.
+  const problems = () =>
+    page.evaluate(() => {
+      const out = []
+      const name = (el) => `${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]}`
+      if (document.documentElement.scrollWidth > window.innerWidth) out.push('page wider than the screen')
+      for (const el of document.querySelectorAll('body *')) {
+        const scrolls = /auto|scroll/.test(getComputedStyle(el).overflowX) && el.scrollWidth > el.clientWidth + 1
+        // The tab strip and the users table scroll sideways on purpose.
+        if (scrolls && !el.matches('.tabs, .table-scroll')) out.push(`${name(el)} scrolls sideways`)
+      }
+      const modal = document.querySelector('.backdrop .modal')
+      if (modal) {
+        const m = modal.getBoundingClientRect()
+        if (m.left < 0 || m.right > window.innerWidth) out.push('dialog wider than the screen')
+        for (const el of modal.querySelectorAll('*')) {
+          const b = el.getBoundingClientRect()
+          if (b.width && (b.left < m.left - 1 || b.right > m.right + 1) && !el.closest('.table-scroll')) {
+            out.push(`${name(el)} spills out of the dialog`)
+            break
+          }
+        }
+      }
+      for (const el of document.querySelectorAll('input:not([type=checkbox]):not([type=radio]), select, textarea')) {
+        if (el.getBoundingClientRect().width && parseFloat(getComputedStyle(el).fontSize) < 16) {
+          out.push(`${name(el)} is under 16px`)
+          break
+        }
+      }
+      return out
+    })
+  // The dialog's last button can be brought fully on screen.
+  const reachable = (label) =>
+    page.evaluate((l) => {
+      const b = [...document.querySelectorAll('.backdrop .modal button')].find((e) => e.textContent.trim() === l)
+      b.scrollIntoView({ block: 'end' })
+      const r = b.getBoundingClientRect()
+      return r.top >= 0 && r.bottom <= window.innerHeight && r.left >= 0 && r.right <= window.innerWidth
+    }, label)
+  const openFromMenu = async (item) => {
+    await page.tap('.menu > button')
+    await sleep(200)
+    await page.evaluate((i) => [...document.querySelectorAll('.menu-items button')].find((b) => b.textContent.trim() === i).click(), item)
+    await page.waitForSelector('.backdrop .modal')
+    await sleep(200)
+  }
+  const closeDialog = async () => {
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('.backdrop', { hidden: true })
+  }
+  const screen = async (width, height) => {
+    await page.emulate({ viewport: { width, height, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }, userAgent: KnownDevices['iPhone 13'].userAgent })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('[data-story-id]')
+  }
+
+  await tab('Current')
+  t.eq('board is clean on a phone', await problems(), [])
+  await page.tap(`[data-story-id="${await id('Set up CI')}"] .title`)
+  await page.waitForSelector('.editor')
+  t.eq('story editor is clean', await problems(), [])
+  await page.keyboard.press('Escape')
+  for (const [item, last] of [['Account…', 'Save'], ['Project settings…', 'Save'], ['Users…', 'Close']]) {
+    await openFromMenu(item)
+    t.eq(`${item} is clean, ${last} reachable`, [await problems(), await reachable(last)], [[], true])
+    await closeDialog()
+  }
+
+  // The narrowest phone still sold.
+  await screen(320, 568)
+  t.eq('board is clean at 320px', await problems(), [])
+  await page.tap('.fab')
+  await page.waitForSelector('form[aria-label="New story"]')
+  t.eq('new story is clean at 320px, Save reachable', [await problems(), await reachable('Save')], [[], true])
+  await closeDialog()
+  await openFromMenu('Account…')
+  t.eq('account is clean at 320px, Save reachable', [await problems(), await reachable('Save')], [[], true])
+  await closeDialog()
+
+  // A phone on its side: still the phone layout, but dialogs are taller than the screen.
+  await screen(844, 390)
+  for (const item of ['Account…', 'Project settings…']) {
+    await openFromMenu(item)
+    t.eq(`${item} in landscape: clean, Save reachable`, [await problems(), await reachable('Save')], [[], true])
+    await closeDialog()
+  }
 } finally {
   await browser.close()
   trackstar.stop()

@@ -62,6 +62,21 @@ body,
   margin: 0;
 }
 
+/* Touch devices: nothing moves unless the user means it to. No font
+   inflation in landscape, no double-tap zoom on rapid taps (panning and
+   pinch zoom stay), and dragging past the end of a list neither bounces the
+   page nor pulls down the browser's refresh. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  touch-action: manipulation;
+}
+
+html,
+body {
+  overscroll-behavior: none;
+}
+
 button,
 input,
 select,
@@ -77,6 +92,13 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 5px 7px;
+  max-width: 100%;
+}
+
+/* A fieldset is as wide as its content unless told otherwise, which pushes
+   a dialog wider than a phone screen. */
+fieldset {
+  min-width: 0;
 }
 
 input:focus,
@@ -140,13 +162,17 @@ kbd {
   color: var(--danger);
 }
 
+/* The backdrop scrolls, not the dialog: a dialog taller than the screen (a
+   phone in landscape, a small window) stays reachable to its last button. */
 .backdrop {
   position: fixed;
   inset: 0;
   background: rgba(10, 15, 25, 0.45);
   display: grid;
   place-items: start center;
-  padding-top: 12vh;
+  padding: 12vh 0 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   z-index: 30;
 }
 
@@ -159,6 +185,11 @@ kbd {
   padding: 16px;
   display: grid;
   gap: 10px;
+}
+
+/* Grid items refuse to shrink below their content by default. */
+.modal > * {
+  min-width: 0;
 }
 
 .modal h2 {
@@ -212,20 +243,23 @@ kbd {
   select {
     min-height: 34px;
   }
+  /* iOS zooms the page in when a field under 16px takes focus, and leaves
+     it zoomed. */
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
   .estimates button {
     min-height: 28px;
     min-width: 28px;
   }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 600px), (max-height: 600px) {
   .backdrop {
-    padding-top: 4vh;
-    align-items: start;
-  }
-  .modal {
-    max-height: 92vh;
-    overflow-y: auto;
+    padding-top: 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   }
 }
 

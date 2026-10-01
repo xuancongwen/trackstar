@@ -105,8 +105,18 @@
   p {
     margin: 0;
   }
+  .row-actions {
+    flex-wrap: wrap;
+  }
   .row-actions .muted {
     margin-right: auto;
     font-size: 11px;
+  }
+  /* Keyboard hints are no use without a keyboard, and the row is too narrow
+     for them on a phone. */
+  @media (pointer: coarse), (max-width: 600px) {
+    .row-actions .muted {
+      display: none;
+    }
   }
 </style>

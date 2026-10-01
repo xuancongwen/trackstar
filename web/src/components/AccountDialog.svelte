@@ -240,9 +240,13 @@
     font-size: 12px;
   }
   .new-token {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
+    display: flex;
+    flex-wrap: wrap;
     gap: 6px;
+  }
+  .new-token input {
+    flex: 1 1 160px;
+    min-width: 0;
   }
   .reveal {
     display: grid;

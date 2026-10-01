@@ -188,6 +188,13 @@
     display: flex;
     flex-direction: column;
   }
+  /* Phone layout (the board's breakpoint): leave room to scroll the last
+     row's button out from under the floating + button. */
+  @media (max-width: 900px) {
+    .scroll {
+      padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    }
+  }
   .list {
     flex: 0 0 auto;
     min-height: 56px;
