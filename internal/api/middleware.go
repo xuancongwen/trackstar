@@ -119,9 +119,10 @@ func securityHeaders(next http.Handler) http.Handler {
 // send Origin on those; it must match the public URL or the Host the request
 // was addressed to (covers LAN access and the Vite dev proxy). Requests
 // without Origin come from non-browser clients, which carry no ambient cookie.
+// The OAuth client endpoints (crossOriginPaths) are exempt: they use no cookie.
 func (s *Server) checkOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions && !crossOriginPaths[r.URL.Path] {
 			if origin := r.Header.Get("Origin"); origin != "" {
 				u, err := url.Parse(origin)
 				if err != nil || !(u.Host == r.Host || (u.Host == s.PublicURL.Host && u.Scheme == s.PublicURL.Scheme)) {

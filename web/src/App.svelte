@@ -4,6 +4,7 @@
   import { setIterationTimeZone } from './lib/format'
   import type { User } from './lib/types'
   import Board from './components/Board.svelte'
+  import Consent from './components/Consent.svelte'
   import Login from './components/Login.svelte'
   import Projects from './components/Projects.svelte'
 
@@ -15,6 +16,11 @@
   // Routes: #/ (projects) and #/p/<slug> (board). Hash routing needs no
   // server cooperation and keeps the app dependency-free.
   let slug = $derived(hash.match(/^#\/p\/([^/]+)/)?.[1] ?? null)
+
+  // The one path route: an MCP client sends the browser to /oauth/authorize
+  // to ask for access. Signing in first keeps the URL, so the request
+  // survives the login form.
+  const authorizing = location.pathname === '/oauth/authorize'
 
   onMount(() => {
     const onHash = () => (hash = location.hash)
@@ -36,7 +42,7 @@
   async function logout() {
     await api.logout().catch(() => {})
     user = null
-    location.hash = '#/'
+    if (!authorizing) location.hash = '#/'
   }
 </script>
 
@@ -46,6 +52,8 @@
   <p class="boot error">Cannot reach the server: {bootError}</p>
 {:else if !user}
   <Login onlogin={(u) => (user = u)} />
+{:else if authorizing}
+  <Consent {user} onlogout={logout} />
 {:else if slug}
   {#key slug}
     <Board {slug} {user} onlogout={logout} onunauthorized={() => (user = null)} onuserchanged={(u) => (user = u)} />

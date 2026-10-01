@@ -45,6 +45,44 @@ type Label struct {
 	Description string
 }
 
+type OauthClient struct {
+	ID           int64
+	ClientID     string
+	Name         string
+	RedirectUris string
+	CreatedAt    int64
+	LastUsedAt   sql.NullInt64
+}
+
+type OauthCode struct {
+	ID            int64
+	CodeHash      string
+	UserID        int64
+	ClientID      int64
+	RedirectUri   string
+	CodeChallenge string
+	ExpiresAt     int64
+	UsedAt        sql.NullInt64
+	GrantID       sql.NullInt64
+}
+
+type OauthGrant struct {
+	ID         int64
+	UserID     int64
+	ClientID   int64
+	CreatedAt  int64
+	LastUsedAt sql.NullInt64
+}
+
+type OauthToken struct {
+	ID        int64
+	GrantID   int64
+	Kind      string
+	TokenHash string
+	ExpiresAt int64
+	UsedAt    sql.NullInt64
+}
+
 type Project struct {
 	ID                    int64
 	Name                  string

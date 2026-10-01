@@ -134,7 +134,8 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (user.User, er
 	return user.FromRow(created), nil
 }
 
-// SetPassword replaces a user's password and signs them out everywhere. It
+// SetPassword replaces a user's password, signs them out everywhere and
+// disconnects their OAuth apps. It
 // backs the `trackstar reset-password` command; there is no e-mail flow.
 func (s *Service) SetPassword(ctx context.Context, email, password string) error {
 	return s.setPassword(ctx, password, func(q dbgen.Querier) (dbgen.User, error) {
@@ -168,7 +169,11 @@ func (s *Service) setPassword(ctx context.Context, password string, find func(db
 		if err := q.UpdateUserPassword(ctx, dbgen.UpdateUserPasswordParams{ID: row.ID, PasswordHash: string(hash), Now: s.now().Unix()}); err != nil {
 			return err
 		}
-		return q.DeleteUserSessions(ctx, row.ID)
+		if err := q.DeleteUserSessions(ctx, row.ID); err != nil {
+			return err
+		}
+		// Connected apps were approved under the old password.
+		return q.DeleteUserOAuthGrants(ctx, row.ID)
 	})
 }
 

@@ -44,14 +44,16 @@ type Server struct {
 	Timezone string
 	Frontend fs.FS
 
-	started      time.Time
-	loginLimiter *auth.Limiter
+	started         time.Time
+	loginLimiter    *auth.Limiter
+	registerLimiter *auth.Limiter
 }
 
 // Handler builds the complete HTTP handler.
 func (s *Server) Handler() http.Handler {
 	s.started = time.Now()
 	s.loginLimiter = auth.NewLimiter(20, 5*time.Minute)
+	s.registerLimiter = auth.NewLimiter(registerLimit, registerWindow)
 	if s.Events == nil {
 		s.Events = events.NewHub()
 	}
@@ -75,6 +77,10 @@ func (s *Server) Handler() http.Handler {
 	session("GET /api/me/tokens", s.handleListTokens)
 	session("POST /api/me/tokens", s.handleCreateToken)
 	session("DELETE /api/me/tokens/{id}", s.handleRevokeToken)
+	session("GET /api/me/grants", s.handleListGrants)
+	session("DELETE /api/me/grants/{id}", s.handleRevokeGrant)
+	session("GET /api/oauth/authorize", s.handleAuthorizeInfo)
+	session("POST /api/oauth/authorize", s.handleAuthorizeDecision)
 	authed("GET /api/users", s.handleListUsers)
 	session("PATCH /api/users/{id}", s.handleUpdateUser)
 	session("POST /api/users/{id}/password", s.handleSetUserPassword)
@@ -121,14 +127,34 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	// MCP for AI agents: the same services behind the same authentication.
-	// Agents authenticate with an API token; a browser session works too.
-	mux.Handle("/mcp", s.requireUser(mcpserver.Handler(mcpserver.Deps{
+	// Agents authenticate with an OAuth access token or an API token; a
+	// browser session works too.
+	mux.Handle("/mcp", s.requireMCPUser(mcpserver.Handler(mcpserver.Deps{
 		Projects: s.Projects, Stories: s.Stories, Velocity: s.Velocity, Users: s.Users,
 		Events: s.Events, Logger: s.Logger, Version: s.Version,
 	}, func(r *http.Request) (user.User, bool) {
 		u := currentUser(r.Context())
 		return u, u.ID != 0
 	})))
+
+	// OAuth for MCP clients that are given only the /mcp URL. The consent
+	// screen at /oauth/authorize is the single-page app (served below).
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", s.handleProtectedResourceMetadata)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", s.handleProtectedResourceMetadata)
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.handleAuthorizationServerMetadata)
+	mux.HandleFunc("OPTIONS /.well-known/", handlePreflight)
+	mux.HandleFunc("/.well-known/", func(w http.ResponseWriter, r *http.Request) {
+		// Not the app's index.html: clients probe for documents we do not have.
+		allowAnyOrigin(w)
+		writeError(w, http.StatusNotFound, "not found")
+	})
+	mux.HandleFunc("POST /oauth/register", s.handleRegisterClient)
+	mux.HandleFunc("POST /oauth/token", s.handleToken)
+	mux.HandleFunc("POST /oauth/revoke", s.handleRevoke)
+	for path := range crossOriginPaths {
+		mux.HandleFunc("OPTIONS "+path, handlePreflight)
+	}
+
 	mux.Handle("/", s.frontendHandler())
 
 	var h http.Handler = mux

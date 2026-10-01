@@ -14,7 +14,16 @@ export default defineConfig({
     // A taken port is an error: silently moving to 5174 would break the
     // TRACKSTAR_PUBLIC_URL the backend was started with.
     strictPort: true,
-    proxy: { '/api': backend, '/health': backend },
+    // /oauth/authorize is deliberately absent: it is the app's consent screen.
+    proxy: {
+      '/api': backend,
+      '/health': backend,
+      '/mcp': backend,
+      '/.well-known': backend,
+      '/oauth/register': backend,
+      '/oauth/token': backend,
+      '/oauth/revoke': backend,
+    },
   },
   // Vitest must resolve Svelte's browser build; leave Vite's defaults alone otherwise.
   ...(process.env.VITEST ? { resolve: { conditions: ['browser'] } } : {}),

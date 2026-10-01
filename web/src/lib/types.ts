@@ -35,6 +35,33 @@ export interface CreatedToken extends ApiToken {
   token: string
 }
 
+/** An MCP client the user approved through the OAuth consent screen. */
+export interface ConnectedApp {
+  id: number
+  client_name: string
+  created_at: string
+  last_used_at: string | null
+}
+
+/** The query parameters of /oauth/authorize, relayed to the server as they came. */
+export interface AuthorizeParams {
+  client_id: string
+  redirect_uri: string
+  response_type: string
+  code_challenge: string
+  code_challenge_method: string
+  state: string
+  resource: string
+  scope: string
+}
+
+/** Who is asking for access, or (redirect_to) where to send a request the client got wrong. */
+export interface AuthorizeInfo {
+  client_name?: string
+  redirect_host?: string
+  redirect_to?: string
+}
+
 export interface Project {
   id: number
   name: string

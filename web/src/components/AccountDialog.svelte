@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
-  import type { ApiToken, CreatedToken, User } from '../lib/types'
+  import type { ApiToken, ConnectedApp, CreatedToken, User } from '../lib/types'
 
   interface Props {
     user: User
@@ -26,13 +26,32 @@
   let tokenError = $state('')
   let copied = $state(false)
 
+  // MCP clients approved on the OAuth consent screen.
+  let apps = $state<ConnectedApp[]>([])
+  let appError = $state('')
+
   onMount(async () => {
     try {
       tokens = await api.tokens()
     } catch (err) {
       tokenError = (err as Error).message
     }
+    try {
+      apps = await api.connectedApps()
+    } catch (err) {
+      appError = (err as Error).message
+    }
   })
+
+  async function disconnectApp(id: number) {
+    appError = ''
+    try {
+      await api.disconnectApp(id)
+      apps = apps.filter((a) => a.id !== id)
+    } catch (err) {
+      appError = (err as Error).message
+    }
+  }
 
   async function createToken() {
     tokenError = ''
@@ -87,7 +106,8 @@
       const u = await api.updateMe(input)
       onsaved(u)
       currentPassword = newPassword = ''
-      saved = input.new_password ? 'Saved. Other devices were signed out.' : 'Saved.'
+      saved = input.new_password ? 'Saved. Other devices were signed out and connected apps disconnected.' : 'Saved.'
+      if (input.new_password) apps = []
     } catch (err) {
       error = (err as Error).message
     }
@@ -164,6 +184,26 @@
         </ul>
       {:else}
         <p class="muted small">No tokens yet.</p>
+      {/if}
+    </fieldset>
+    <fieldset class="apps">
+      <legend>Connected apps</legend>
+      <p class="muted small">
+        MCP clients you approved by signing in, such as a Claude connector. Each acts as you until you disconnect it.
+      </p>
+      {#if appError}<p class="error" role="alert">{appError}</p>{/if}
+      {#if apps.length}
+        <ul class="token-list">
+          {#each apps as a (a.id)}
+            <li>
+              <span class="name">{a.client_name}</span>
+              <span class="muted small">connected {when(a.created_at)} · last used {when(a.last_used_at)}</span>
+              <button type="button" class="link danger" onclick={() => disconnectApp(a.id)}>Disconnect</button>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="muted small">No connected apps.</p>
       {/if}
     </fieldset>
     <div class="row-actions">

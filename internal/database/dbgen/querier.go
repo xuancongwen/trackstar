@@ -29,6 +29,10 @@ type Querier interface {
 	CreateComment(ctx context.Context, arg CreateCommentParams) (Comment, error)
 	CreateEpic(ctx context.Context, arg CreateEpicParams) (Label, error)
 	CreateLabel(ctx context.Context, arg CreateLabelParams) (Label, error)
+	CreateOAuthClient(ctx context.Context, arg CreateOAuthClientParams) (OauthClient, error)
+	CreateOAuthCode(ctx context.Context, arg CreateOAuthCodeParams) error
+	CreateOAuthGrant(ctx context.Context, arg CreateOAuthGrantParams) (OauthGrant, error)
+	CreateOAuthToken(ctx context.Context, arg CreateOAuthTokenParams) error
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
 	CreateSavedFilter(ctx context.Context, arg CreateSavedFilterParams) (SavedFilter, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) error
@@ -37,7 +41,13 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error)
 	DeleteComment(ctx context.Context, id int64) error
+	DeleteEmptyOAuthGrants(ctx context.Context) error
+	DeleteExpiredOAuthCodes(ctx context.Context, now int64) error
+	DeleteExpiredOAuthTokens(ctx context.Context, now int64) error
 	DeleteExpiredSessions(ctx context.Context, now int64) error
+	DeleteIdleOAuthClients(ctx context.Context, before sql.NullInt64) error
+	DeleteOAuthGrant(ctx context.Context, arg DeleteOAuthGrantParams) (int64, error)
+	DeleteOAuthGrantByID(ctx context.Context, id int64) error
 	DeleteProject(ctx context.Context, id int64) error
 	DeleteProjectMember(ctx context.Context, arg DeleteProjectMemberParams) error
 	DeleteSavedFilter(ctx context.Context, arg DeleteSavedFilterParams) (int64, error)
@@ -47,11 +57,17 @@ type Querier interface {
 	// Plain labels disappear with their last story; epics are kept until demoted.
 	DeleteUnusedLabels(ctx context.Context, projectID int64) error
 	DeleteUserAPITokens(ctx context.Context, userID int64) error
+	DeleteUserOAuthGrants(ctx context.Context, userID int64) error
 	DeleteUserSessions(ctx context.Context, userID int64) error
 	GetAPITokenUser(ctx context.Context, arg GetAPITokenUserParams) (GetAPITokenUserRow, error)
 	GetComment(ctx context.Context, id int64) (Comment, error)
 	GetLabel(ctx context.Context, id int64) (Label, error)
 	GetLabelByName(ctx context.Context, arg GetLabelByNameParams) (Label, error)
+	GetOAuthAccessTokenUser(ctx context.Context, arg GetOAuthAccessTokenUserParams) (GetOAuthAccessTokenUserRow, error)
+	GetOAuthClient(ctx context.Context, clientID string) (OauthClient, error)
+	GetOAuthCode(ctx context.Context, codeHash string) (OauthCode, error)
+	GetOAuthGrantUser(ctx context.Context, id int64) (User, error)
+	GetOAuthToken(ctx context.Context, tokenHash string) (GetOAuthTokenRow, error)
 	GetProject(ctx context.Context, id int64) (Project, error)
 	GetProjectBySlug(ctx context.Context, slug string) (Project, error)
 	GetProjectMember(ctx context.Context, arg GetProjectMemberParams) (string, error)
@@ -71,6 +87,7 @@ type Querier interface {
 	// Live stories per label with what progress needs.
 	ListLabelStoryStats(ctx context.Context, projectID int64) ([]ListLabelStoryStatsRow, error)
 	ListLabels(ctx context.Context, projectID int64) ([]Label, error)
+	ListOAuthGrants(ctx context.Context, userID int64) ([]ListOAuthGrantsRow, error)
 	ListProjectBlockers(ctx context.Context, projectID int64) ([]StoryBlocker, error)
 	ListProjectMembers(ctx context.Context, projectID int64) ([]ListProjectMembersRow, error)
 	ListProjectStoryLabels(ctx context.Context, projectID int64) ([]ListProjectStoryLabelsRow, error)
@@ -95,6 +112,8 @@ type Querier interface {
 	SetStoryDeleted(ctx context.Context, arg SetStoryDeletedParams) error
 	SetStoryPosition(ctx context.Context, arg SetStoryPositionParams) error
 	TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error
+	TouchOAuthClient(ctx context.Context, arg TouchOAuthClientParams) error
+	TouchOAuthGrant(ctx context.Context, arg TouchOAuthGrantParams) error
 	UpdateLabel(ctx context.Context, arg UpdateLabelParams) (Label, error)
 	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)
 	UpdateStory(ctx context.Context, arg UpdateStoryParams) (Story, error)
@@ -102,6 +121,8 @@ type Querier interface {
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpsertProjectMember(ctx context.Context, arg UpsertProjectMemberParams) error
+	UseOAuthCode(ctx context.Context, arg UseOAuthCodeParams) (int64, error)
+	UseOAuthToken(ctx context.Context, arg UseOAuthTokenParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -103,6 +103,8 @@ you land on the board:
   tokens**: a token acts as you for scripts and MCP clients (send it as
   `Authorization: Bearer tst_…`). The secret is shown once; revoke it from the
   same dialog. Tokens cannot change passwords, manage accounts or mint tokens.
+  **Connected apps** lists the MCP clients you approved by signing in (see
+  [MCP for AI agents](#mcp-for-ai-agents)); *Disconnect* cuts one off.
   Administrators get
   *Users*: rename, promote/demote, deactivate/reactivate, reset a password.
   Administrators can also **Reopen** an accepted story (it drops out of
@@ -141,10 +143,10 @@ SQLite (WAL)                                              ◀── db/migration
 ```
 cmd/trackstar/          main: serve | migrate | backup | check | reset-password | healthcheck | version
 .github/workflows/    ci.yml (lint, generated-code check, tests, e2e, Docker probe), release.yml (tagged releases)
-internal/api/         handlers, middleware (request id, logging, origin check, trusted proxies), SSE stream
+internal/api/         handlers, middleware (request id, logging, origin check, trusted proxies), SSE stream, OAuth endpoints
 internal/mcpserver/   MCP tools and resources over the same services, mounted at /mcp behind the same auth
 internal/events/      in-process change hub: Publish(project) → every open stream of that project
-internal/auth/        bcrypt passwords, server-side sessions (HMAC-hashed tokens), login rate limit
+internal/auth/        bcrypt passwords, server-side sessions (HMAC-hashed tokens), login rate limit, API tokens, OAuth (oauth.go)
 internal/config/      TRACKSTAR_* environment → validated Config
 internal/database/    Open/Migrate/InTx/Backup; sqlite.go is the only driver-specific file
 internal/story/       stories, workflow (states.go), ordering (position.go), comments, labels, search
@@ -264,8 +266,9 @@ The installed layout is:
 /opt/trackstar/scripts/           update.sh, backup.sh, restore.sh, …
 ```
 
-The binary serves the frontend on `/`, the API on `/api/*`, MCP on `/mcp`
-and `GET /health` (`{"status":"ok"}`, checks the database, no authentication).
+The binary serves the frontend on `/`, the API on `/api/*`, MCP on `/mcp`,
+OAuth for MCP clients on `/oauth/*` and `/.well-known/oauth-*`, and
+`GET /health` (`{"status":"ok"}`, checks the database, no authentication).
 
 ## Configuration
 
@@ -278,7 +281,7 @@ See [`deploy/trackstar.env.example`](deploy/trackstar.env.example).
 | `TRACKSTAR_DATA_DIR` | `./data` | created if missing |
 | `TRACKSTAR_DATABASE_DRIVER` | `sqlite` | `postgres` is reserved |
 | `TRACKSTAR_DATABASE_URL` | `$DATA_DIR/trackstar.db` | |
-| `TRACKSTAR_PUBLIC_URL` | `http://localhost:<port>/` | decides Secure cookies and the allowed `Origin` |
+| `TRACKSTAR_PUBLIC_URL` | `http://localhost:<port>/` | decides Secure cookies and the allowed `Origin`; also the OAuth issuer, so it must be exactly the URL clients reach |
 | `TRACKSTAR_ALLOW_REGISTRATION` | `true` | the first account can always be created |
 | `TRACKSTAR_SESSION_SECRET` | generated into `$DATA_DIR/session_secret` | ≥ 32 chars |
 | `TRACKSTAR_LOG_LEVEL` | `info` | `debug` also logs `/health` |
@@ -459,6 +462,13 @@ limiter, and only when the TCP peer is listed in `TRACKSTAR_TRUSTED_PROXIES` —
 direct clients cannot spoof them. If cloudflared runs on another machine, add
 its address. Full walkthrough: [`deploy/cloudflared-example.md`](deploy/cloudflared-example.md).
 
+If MCP clients connect with OAuth (a Claude connector does), their servers
+call `/mcp`, `/.well-known/*`, `/oauth/register`, `/oauth/token` and
+`/oauth/revoke` directly, with no browser. Keep those paths out of Cloudflare
+Access policies, managed challenges and Bot Fight Mode, or the connection
+fails before Trackstar sees it. `/oauth/authorize` is opened in the user's
+browser and can stay behind whatever protects the rest of the site.
+
 ## Backups and restore
 
 ```sh
@@ -472,8 +482,9 @@ and verified with `PRAGMA integrity_check`), `trackstar.env` with the session
 secret blanked, a `MANIFEST`, and `uploads/` should that directory ever exist.
 `--include-secrets` keeps the secret (restore with `--with-config` to bring the
 configuration back too); without it a restore simply signs everyone out and
-invalidates every API token (they are keyed with the same secret), so MCP
-clients and scripts need new ones.
+invalidates every API token and OAuth connection (they are keyed with the
+same secret), so scripts need new tokens and connected apps must be
+authorized again.
 
 `restore.sh` validates the archive *before* touching anything, stops the
 service, moves the current data to `/var/lib/trackstar/pre-restore-<timestamp>/`,
@@ -517,6 +528,7 @@ refuse bearer tokens.
 POST   /api/auth/register | /api/auth/login | /api/auth/logout
 GET    /api/me            PATCH /api/me {display_name, current_password, new_password}   (session)
 GET    /api/me/tokens     POST /api/me/tokens {name, expires_in_days?} → {…, token}   DELETE /api/me/tokens/:id   (session)
+GET    /api/me/grants     DELETE /api/me/grants/:id   (session; apps connected through OAuth)
 GET    /api/users         PATCH /api/users/:id {display_name, is_admin, is_active}   POST /api/users/:id/password   (admin, session)
 GET    /api/config
 GET    /api/projects      POST /api/projects
@@ -545,6 +557,20 @@ GET    /health
 `GET /api/projects/:id/velocity` →
 `{"velocity":11,"average":11.0,"window":3,"estimated":false,"iterations":[{"number":12,"points":10},…]}`
 
+The OAuth endpoints exist for MCP clients (next section) and follow their
+RFCs rather than the conventions above: errors are
+`{"error": "invalid_grant", "error_description": "…"}`.
+
+```
+GET    /.well-known/oauth-protected-resource     RFC 9728: /mcp is guarded by this server
+GET    /.well-known/oauth-authorization-server   RFC 8414: the endpoints below
+POST   /oauth/register     RFC 7591 {client_name, redirect_uris} → {client_id, …}   (open, rate limited)
+GET    /oauth/authorize    the consent screen, in the browser; PKCE S256 required
+POST   /oauth/token        form-encoded; grant_type=authorization_code | refresh_token
+POST   /oauth/revoke       RFC 7009 {token}
+GET    /api/oauth/authorize   POST /api/oauth/authorize   (session; what the consent screen calls)
+```
+
 ## MCP for AI agents
 
 The same binary serves a [Model Context Protocol](https://modelcontextprotocol.io)
@@ -556,15 +582,46 @@ story).
 
 ### Setting up access
 
-MCP clients authenticate with a personal API token sent as a bearer. There
-is no OAuth flow: the token is the whole credential, so treat it like a
-password.
+There are two ways in. Both act as you: the agent sees the projects you see
+and its changes are logged under your name.
+
+**Sign in (OAuth).** A client that supports MCP authorization needs only the
+URL. It discovers the rest from the 401 it gets, registers itself, and opens
+Trackstar in your browser, where you sign in and approve it.
+
+- Claude (web, desktop, mobile): *Settings ▸ Connectors ▸ Add custom
+  connector*, enter `https://track.example.com/mcp`, then *Connect*. The
+  connector belongs to your Claude account, so it is available everywhere you
+  use Claude. Claude's servers make the calls, so the instance has to be
+  reachable from the internet (see [Cloudflare Tunnel](#cloudflare-tunnel)).
+- Claude Code:
+
+  ```sh
+  claude mcp add trackstar --transport http https://track.example.com/mcp
+  ```
+
+  then run `/mcp` in a session and authenticate. (`--scope user` makes it
+  available in every project.)
+
+The consent screen names the app and shows the host your browser is sent to
+afterwards. The name is whatever the app calls itself, so approve only a
+request you started. Approved apps are listed under *your name ▸ Account ▸
+Connected apps*; **Disconnect** stops one on its next call. An app holds an
+access token that lasts an hour and a refresh token that is replaced on every
+use; a connection left unused for 60 days ends by itself. Changing or
+resetting your password disconnects every app, as does deactivating the
+account.
+
+`TRACKSTAR_PUBLIC_URL` must be the URL the client was given: the discovery
+documents and the token audience are built from it.
+
+**Personal API token.** For scripts, curl and clients without OAuth support.
+The token is the whole credential, so treat it like a password.
 
 1. Sign in to Trackstar in a browser and open *your name ▸ Account*.
 2. Under **API tokens**, give the token a name (e.g. `claude-code`), pick an
    expiry (or none) and press **Create**. Copy the `tst_…` secret now; it is
-   shown once. The token acts as you: it sees the projects you see and its
-   changes are logged under your name.
+   shown once.
 3. Register the endpoint with your client. For Claude Code:
 
    ```sh
@@ -572,8 +629,8 @@ password.
      --header "Authorization: Bearer tst_…"
    ```
 
-   (`--scope user` makes it available in every project.) For a client that
-   only takes a JSON config or speaks stdio, bridge it with `mcp-remote`:
+   For a client that only takes a JSON config or speaks stdio, bridge it
+   with `mcp-remote`:
 
    ```json
    {
@@ -623,11 +680,12 @@ explain sections, the workflow and move semantics to the model.
 
 Deliberately absent: delete/restore, epic and member management, anything
 about accounts or tokens. Errors come back as tool errors with the API's
-message (`story 42 not found`, `project apollo not found` for one the token's
-owner is not a member of),
+message (`story 42 not found`, `project apollo not found` for one the acting
+user is not a member of),
 so the model can correct itself. Each tool call is one HTTP request with no
 server-side session: nothing to keep alive through the tunnel, nothing lost
-on a restart, and a revoked token stops the agent on its next call.
+on a restart, and a revoked token or disconnected app stops the agent on its
+next call.
 
 ## Resource usage
 
@@ -699,6 +757,10 @@ HTTP request that costs the same as the equivalent API call.
   instead to keep it readable); restore from a backup if it was a mistake.
 - No attachments, sub-epics, or notifications. Blockers are informational.
 - PostgreSQL is designed for but not implemented.
+- OAuth has no scopes: a connected app has its user's full project access,
+  like an API token. Clients are public (PKCE, no client secret), register
+  themselves, and may redirect only to https or a loopback address, so an
+  app that needs a custom URI scheme cannot connect.
 - On phones there is no cross-panel drag (use the drawer's Move to) and no
   multi-select; keyboard shortcuts need a keyboard.
 

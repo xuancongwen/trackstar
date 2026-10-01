@@ -1,6 +1,9 @@
 import type {
   ApiToken,
+  AuthorizeInfo,
+  AuthorizeParams,
   Comment,
+  ConnectedApp,
   CreatedToken,
   Epic,
   Iteration,
@@ -62,6 +65,12 @@ export const api = {
   createToken: (name: string, expires_in_days = 0) =>
     request<CreatedToken>('POST', '/api/me/tokens', { name, expires_in_days }),
   revokeToken: (id: number) => request<void>('DELETE', `/api/me/tokens/${id}`),
+  connectedApps: () => request<ConnectedApp[]>('GET', '/api/me/grants'),
+  disconnectApp: (id: number) => request<void>('DELETE', `/api/me/grants/${id}`),
+  authorizeInfo: (params: AuthorizeParams) =>
+    request<AuthorizeInfo>('GET', `/api/oauth/authorize?${new URLSearchParams({ ...params })}`),
+  authorize: (params: AuthorizeParams, approve: boolean) =>
+    request<{ redirect_to: string }>('POST', '/api/oauth/authorize', { ...params, approve }),
   users: () => request<User[]>('GET', '/api/users'),
   updateUser: (id: number, input: { display_name?: string; is_admin?: boolean; is_active?: boolean }) =>
     request<User>('PATCH', `/api/users/${id}`, input),

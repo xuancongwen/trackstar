@@ -124,7 +124,10 @@ func (s *Service) Update(ctx context.Context, actorID, id int64, in AdminUpdate)
 			return err
 		}
 		if !isActive {
-			return q.DeleteUserSessions(ctx, id) // signed out everywhere, immediately
+			if err := q.DeleteUserSessions(ctx, id); err != nil { // signed out everywhere, immediately
+				return err
+			}
+			return q.DeleteUserOAuthGrants(ctx, id) // and connected apps do not come back on reactivation
 		}
 		return nil
 	})
