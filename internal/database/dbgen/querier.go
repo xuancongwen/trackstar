@@ -18,6 +18,7 @@ type Querier interface {
 	ClearStoryBlockers(ctx context.Context, storyID int64) error
 	ClearStoryLabels(ctx context.Context, storyID int64) error
 	CountActiveAdmins(ctx context.Context) (int64, error)
+	CountComments(ctx context.Context, storyID int64) (int64, error)
 	CountCommentsByProject(ctx context.Context, projectID int64) ([]CountCommentsByProjectRow, error)
 	CountProjectMembers(ctx context.Context, projectID int64) (int64, error)
 	// Live (not deleted) story counts per project and state, for system info.

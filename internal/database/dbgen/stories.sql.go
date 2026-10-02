@@ -11,6 +11,17 @@ import (
 	"strings"
 )
 
+const countComments = `-- name: CountComments :one
+SELECT COUNT(*) FROM comments WHERE story_id = ?1
+`
+
+func (q *Queries) CountComments(ctx context.Context, storyID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countComments, storyID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countCommentsByProject = `-- name: CountCommentsByProject :many
 SELECT comments.story_id, COUNT(*) AS total
 FROM comments

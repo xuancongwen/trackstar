@@ -530,6 +530,27 @@ func TestCommentsAndDelete(t *testing.T) {
 		t.Fatalf("comment_count in list = %d", list[0].CommentCount)
 	}
 
+	// Every way of changing a story answers with the same counts as reading it.
+	if _, err := f.svc.AddTask(f.ctx, s.ID, "Write it down"); err != nil {
+		t.Fatal(err)
+	}
+	counts := func(what string, st story.Story, err error) {
+		t.Helper()
+		if err != nil || st.CommentCount != 1 || st.TaskCount != 1 || st.TasksDone != 0 {
+			t.Errorf("%s: comments %d, tasks %d/%d, err %v; want 1 comment, 0/1 tasks", what, st.CommentCount, st.TasksDone, st.TaskCount, err)
+		}
+	}
+	title := "Story, renamed"
+	updated, err := f.svc.Update(f.ctx, s.ID, story.Actor{ID: f.user}, story.UpdateInput{Title: &title})
+	counts("update", updated, err)
+	moved, err := f.svc.Move(f.ctx, s.ID, f.user, story.MoveInput{Section: story.SectionBacklog})
+	counts("move", moved.Story, err)
+	many, err := f.svc.MoveMany(f.ctx, []int64{s.ID}, f.user, story.MoveInput{Section: story.SectionIcebox})
+	if len(many) != 1 {
+		t.Fatalf("move many = %+v, %v", many, err)
+	}
+	counts("move many", many[0], err)
+
 	if _, err := f.svc.Delete(f.ctx, s.ID, f.user); err != nil {
 		t.Fatal(err)
 	}

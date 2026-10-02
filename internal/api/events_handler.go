@@ -65,12 +65,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		return rc.Flush() == nil
 	}
+	// Subscribe before the first bytes go out: the client loads the board
+	// once the stream is open, and a change made after that must reach it.
+	ch, cancel := s.Events.Subscribe(p.ID)
+	defer cancel()
 	if !send("retry: 2000\n: connected\n\n") {
 		return
 	}
 
-	ch, cancel := s.Events.Subscribe(p.ID)
-	defer cancel()
 	ticker := time.NewTicker(heartbeat)
 	defer ticker.Stop()
 	token := sessionToken(r)

@@ -161,6 +161,11 @@ func TestEndToEndWorkflow(t *testing.T) {
 	if len(detail.Comments) != 1 || len(detail.Labels) != 1 {
 		t.Fatalf("detail = %+v", detail)
 	}
+	// An update answers with the counts a read would give.
+	c.must(http.StatusOK, "PATCH", "/api/stories/2", map[string]any{"title": "Renamed"}, &b)
+	if b.CommentCount != 1 {
+		t.Fatalf("comment_count after update = %d", b.CommentCount)
+	}
 
 	var list []story.Story
 	c.must(http.StatusOK, "GET", "/api/projects/1/stories", nil, &list)

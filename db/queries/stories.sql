@@ -81,6 +81,9 @@ SELECT * FROM comments WHERE id = sqlc.arg(id);
 -- name: DeleteComment :exec
 DELETE FROM comments WHERE id = sqlc.arg(id);
 
+-- name: CountComments :one
+SELECT COUNT(*) FROM comments WHERE story_id = sqlc.arg(story_id);
+
 -- name: CountCommentsByProject :many
 SELECT comments.story_id, COUNT(*) AS total
 FROM comments

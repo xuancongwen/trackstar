@@ -227,6 +227,10 @@ func TestWorkflowThroughTools(t *testing.T) {
 	if len(d.Comments) != 1 || d.Comments[0].UserID != f.admin.ID || len(d.Activity) < 3 {
 		t.Fatalf("detail = %+v", d)
 	}
+	mustCall(t, cs, "update_story", map[string]any{"id": a.ID, "labels": []string{"seen"}}, &upd)
+	if upd.CommentCount != 1 {
+		t.Fatalf("comment_count after update = %d", upd.CommentCount)
+	}
 	if msg := call(t, cs, "get_story", map[string]any{"id": 999}, nil); !strings.Contains(msg, "not found") {
 		t.Fatalf("missing story: %q", msg)
 	}

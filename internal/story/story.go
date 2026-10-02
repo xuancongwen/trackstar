@@ -230,7 +230,6 @@ func (s *Service) Get(ctx context.Context, id int64) (Detail, error) {
 	for i, c := range rows {
 		d.Comments[i] = commentFromRow(c)
 	}
-	d.CommentCount = int64(len(rows))
 	acts, err := s.store.ListActivity(ctx, id)
 	if err != nil {
 		return Detail{}, err
@@ -738,7 +737,8 @@ func (s *Service) save(ctx context.Context, q dbgen.Querier, row dbgen.Story) (S
 	return s.load(ctx, q, updated)
 }
 
-// load turns a row into a Story with labels and section filled in.
+// load turns a row into a Story with labels, section, blockers and the
+// comment and task counts filled in.
 func (s *Service) load(ctx context.Context, q dbgen.Querier, row dbgen.Story) (Story, error) {
 	currentStart, err := s.currentIterationStart(ctx, q, row.ProjectID)
 	if err != nil {
@@ -766,6 +766,9 @@ func (s *Service) load(ctx context.Context, q dbgen.Querier, row dbgen.Story) (S
 		if State(b.State) != StateAccepted {
 			st.Blocked = true
 		}
+	}
+	if st.CommentCount, err = q.CountComments(ctx, row.ID); err != nil {
+		return Story{}, err
 	}
 	tasks, err := q.ListTasks(ctx, row.ID)
 	if err != nil {
