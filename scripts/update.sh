@@ -141,7 +141,14 @@ systemctl restart trackstar || true
 if wait_healthy; then
   if [ -n "$NEW_SCRIPTS" ]; then
     install -m 0755 "$NEW_SCRIPTS"/scripts/*.sh "$OPT_DIR/scripts/"
-    [ -d "$NEW_SCRIPTS/deploy" ] && install -m 0644 "$NEW_SCRIPTS"/deploy/* "$OPT_DIR/deploy/"
+    if [ -d "$NEW_SCRIPTS/deploy" ]; then
+      install -m 0644 "$NEW_SCRIPTS"/deploy/* "$OPT_DIR/deploy/"
+      # setup.sh moved here from scripts/; older releases have no script in deploy/.
+      if [ -f "$OPT_DIR/deploy/setup.sh" ]; then
+        chmod 0755 "$OPT_DIR/deploy/setup.sh"
+        rm -f "$OPT_DIR/scripts/setup.sh" "$OPT_DIR/scripts/setup-lxc.sh" "$OPT_DIR/scripts/deploy.sh"
+      fi
+    fi
   fi
   log "Trackstar $NEW_VERSION is healthy. Previous binary kept at $BIN_PATH.previous"
   exit 0

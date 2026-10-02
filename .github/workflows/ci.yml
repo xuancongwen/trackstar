@@ -28,7 +28,7 @@ jobs:
           npm --prefix web run check
           sudo apt-get install -y -qq shellcheck >/dev/null
           # info-level notes (quoted remote commands, ls -t on our own timestamped files) are intentional
-          shellcheck --severity=warning scripts/*.sh
+          shellcheck --severity=warning scripts/*.sh deploy/*.sh
 
       - name: Generated code is up to date
         run: |

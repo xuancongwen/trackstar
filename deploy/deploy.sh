@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Build locally and deploy to a host over SSH.
 #
-#   ./scripts/deploy.sh root@192.168.1.240
-#   ./scripts/deploy.sh                    (target from DEPLOY_TARGET in deploy/deploy.env)
-#   ./scripts/deploy.sh --skip-build deploy@track.example.com      (needs passwordless sudo)
-#   ./scripts/deploy.sh root@new-host -- --public-url https://track.example.com/
+#   ./deploy/deploy.sh root@192.168.1.240
+#   ./deploy/deploy.sh                    (target from DEPLOY_TARGET in deploy/deploy.env)
+#   ./deploy/deploy.sh --skip-build deploy@track.example.com      (needs passwordless sudo)
+#   ./deploy/deploy.sh root@new-host -- --public-url https://track.example.com/
 #
 # On a host without Trackstar this performs the first installation through
-# setup.sh (arguments after `--` are passed to it). On an installed host it
+# deploy/setup.sh (arguments after `--` are passed to it). On an installed host it
 # only swaps the binary: /etc/trackstar/trackstar.env is never touched, the old
 # binary is kept as trackstar.previous and is restored if the health check fails.
 set -euo pipefail
@@ -74,14 +74,14 @@ log "Uploading"
 STAGE=$(remote 'mktemp -d /tmp/trackstar-deploy.XXXXXX')
 # shellcheck disable=SC2064
 trap "ssh ${SSH_OPTS[*]} $TARGET 'rm -rf $STAGE' >/dev/null 2>&1 || true" EXIT
-tar -C "$ROOT_DIR" --exclude=deploy/deploy.env -czf - scripts deploy -C "$(dirname "$OUT")" "$(basename "$OUT")" \
+tar -C "$ROOT_DIR" --exclude=deploy/deploy.env --exclude=deploy/deploy.sh -czf - scripts deploy -C "$(dirname "$OUT")" "$(basename "$OUT")" \
   | remote "tar -xzf - --no-same-owner -C '$STAGE' && mv '$STAGE/$(basename "$OUT")' '$STAGE/trackstar'"
 
 if ! remote "test -f /etc/trackstar/trackstar.env && test -x /usr/local/bin/trackstar"; then
   log "Trackstar is not installed on $TARGET yet: running setup.sh"
   setup_args=""
   for a in "${SETUP_ARGS[@]+"${SETUP_ARGS[@]}"}"; do setup_args+=" $(printf '%q' "$a")"; done
-  remote "$SUDO bash '$STAGE/scripts/setup.sh' --binary '$STAGE/trackstar'$setup_args"
+  remote "$SUDO bash '$STAGE/deploy/setup.sh' --binary '$STAGE/trackstar'$setup_args"
   exit 0
 fi
 
@@ -127,6 +127,9 @@ if wait_healthy; then
   install -d /opt/trackstar/scripts /opt/trackstar/deploy
   install -m 0755 "$STAGE"/scripts/*.sh /opt/trackstar/scripts/
   install -m 0644 "$STAGE"/deploy/* /opt/trackstar/deploy/
+  chmod 0755 /opt/trackstar/deploy/*.sh
+  # These lived in scripts/ before they moved to deploy/.
+  rm -f /opt/trackstar/scripts/setup.sh /opt/trackstar/scripts/setup-lxc.sh /opt/trackstar/scripts/deploy.sh
   say "healthy: $old → $new   (rollback binary: $BIN.previous)"
   exit 0
 fi

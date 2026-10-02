@@ -158,7 +158,8 @@ internal/iteration/   Schedule → iteration N, iteration containing t
 internal/velocity/    velocity + iteration history from accepted stories
 db/                   migrations, queries, sqlc.yaml
 web/                  Svelte app; web/embed.go embeds web/dist
-scripts/ deploy/      setup-lxc.sh (prepare an LXC, system level), setup.sh (install the app), deploy, update, backup, restore; unit, env example
+deploy/               setup.sh (prepare a machine and install), deploy.sh (build and ship from a checkout); unit, env examples
+scripts/              run on the server: update, backup, restore
 ```
 
 Design decisions worth knowing:
@@ -267,7 +268,8 @@ The installed layout is:
 /usr/local/bin/trackstar          the application (trackstar.previous = rollback copy)
 /etc/trackstar/trackstar.env        configuration (root:trackstar 0640)
 /var/lib/trackstar/trackstar.db     data (+ -wal/-shm, backups/, session_secret)
-/opt/trackstar/scripts/           update.sh, backup.sh, restore.sh, …
+/opt/trackstar/scripts/           update.sh, backup.sh, restore.sh
+/opt/trackstar/deploy/            setup.sh (re-run to change options), unit and env examples
 ```
 
 The binary serves the frontend on `/`, the API on `/api/*`, MCP on `/mcp`,
@@ -339,19 +341,34 @@ On the server:
 
 ```sh
 tar xzf trackstar-*-linux-amd64.tar.gz && cd trackstar-*-linux-amd64
-sudo ./scripts/setup.sh --public-url https://track.example.com/ --port 3000
+sudo ./deploy/setup.sh --public-url https://track.example.com/ --port 3000
 ```
 
 Or do both in one step from your checkout (first run installs, later runs
-deploy): `./scripts/deploy.sh root@droplet -- --public-url https://track.example.com/`
+deploy): `./deploy/deploy.sh root@droplet -- --public-url https://track.example.com/`
 
-`setup.sh` validates the distribution, installs `ca-certificates curl tar`,
-creates the `trackstar` user, `/etc/trackstar`, `/var/lib/trackstar`, installs the
-binary, writes `trackstar.env` (generating a session secret), installs and
-enables the hardened systemd unit, starts it and waits for `/health`. It is
-idempotent: re-running keeps configuration, secret and data, and only changes
-options you pass explicitly. Other sources for the binary: `--binary PATH`,
-`--release-url URL`, `--repo OWNER/NAME [--version TAG]` (GitHub releases, e.g.
+`setup.sh` is the one script that turns a fresh machine into a running
+Trackstar, the same on an LXC, a VM or a droplet. It:
+
+- validates the distribution and prints what the machine provides (container
+  or not, privileged?, cores, RAM, swap, free disk), warning about anything
+  that would bite later (under 200 MB RAM, no IP address);
+- installs the base packages a slim template lacks (`ca-certificates curl tar
+  tzdata openssh-server …`), enables SSH and makes the journal persistent. A
+  first install also runs `apt-get upgrade` (`--skip-upgrade` to leave that
+  to you);
+- optionally sets the time zone (`--timezone`, used for the system clock and
+  for iteration boundaries) and authorizes an SSH key for root
+  (`--authorized-key`);
+- creates the `trackstar` user, `/etc/trackstar` and `/var/lib/trackstar`,
+  installs the binary, writes `trackstar.env` (generating a session secret),
+  installs and enables the hardened systemd unit, starts it and waits for
+  `/health`.
+
+It is idempotent: re-running keeps configuration, secret and data, only
+changes the options you pass explicitly, and does not upgrade the system
+again. Other sources for the binary: `--binary PATH`, `--release-url URL`,
+`--repo OWNER/NAME [--version TAG]` (GitHub releases, e.g.
 `--repo xuancongwen/trackstar`; the repo is remembered for `update.sh`).
 
 Put TLS in front of it: a Cloudflare Tunnel (below), or Caddy/nginx on the same
@@ -374,37 +391,30 @@ need anything unusual. Recommended (floor in brackets):
 | Features | none | **nesting is not required** — see below |
 | Start at boot | yes | |
 
-Then two steps, kept deliberately separate:
-
-**1. Prepare the container (system level).** Inside the container as root,
-after your own network setup — copy just this one file in, it is standalone:
-
-```sh
-./setup-lxc.sh --timezone Europe/Berlin --authorized-key ~/.ssh/id_ed25519.pub
-```
-
-`setup-lxc.sh` checks that it really is an LXC on Debian/Ubuntu (`--force` to
-override), prints what the container provides (privileged?, cores, RAM/swap
-limits from cgroups, free disk, whether mount namespaces work) and warns about
-anything that would bite later (under 200 MB RAM, no IP, broken DNS), runs
-`apt update`/`upgrade` (`--skip-upgrade` if you already did), installs the
-base packages a slim template lacks (`ca-certificates curl tar
-openssh-server …`), enables SSH, makes the journal persistent and, optionally,
-sets the system time zone and authorizes an SSH key for root. It installs
-**nothing application-specific** — no user, directories, config or service.
-
-**2. Deploy the application.** From your workstation:
+Give the container your SSH public key when you create it (the *SSH public
+key* field in the Proxmox dialog, or `pct create … --ssh-public-keys`). Then
+one command from your workstation:
 
 ```sh
-./scripts/deploy.sh root@<container-ip> -- --public-url https://track.example.com/ --timezone Europe/Berlin
+./deploy/deploy.sh root@<container-ip> -- --public-url https://track.example.com/ --timezone Europe/Berlin
 ```
 
-On the first contact this runs `setup.sh` inside the container (binary,
-`trackstar` user, `/etc/trackstar`, `/var/lib/trackstar`, systemd unit, session
-secret); afterwards it only swaps the binary with snapshot and rollback. Everything
-the application needs is the deploy's job, so a container prepared once never
-needs revisiting when the application changes. (Without SSH you can also copy a
-release archive in and run `sudo ./scripts/setup.sh …` yourself.)
+On the first contact this runs `setup.sh` inside the container, which
+prepares the system and installs the application (see the previous section
+for the list). Afterwards the same command only swaps the binary, with
+snapshot and rollback, so the container never needs revisiting when the
+application changes.
+
+No SSH access yet? Copy `deploy/setup.sh` into the container (it is
+standalone for this) and run it in the console as root:
+
+```sh
+./setup.sh --authorized-key "ssh-ed25519 AAAA… you@workstation"
+```
+
+With no binary to install it prepares the system, authorizes the key and
+prints the deploy command to run next. Without a workstation at all, copy a
+release archive in and run `sudo ./deploy/setup.sh …` there, as on any server.
 
 **About nesting.** systemd's mount-namespace sandboxing (`ProtectSystem=`,
 `PrivateTmp=`, …) is unavailable in an unprivileged container without the
@@ -413,7 +423,8 @@ the probe fails, installs
 `/etc/systemd/system/trackstar.service.d/10-no-namespaces.conf`, which turns off
 just those directives. The service still runs as the unprivileged `trackstar`
 user with no capabilities, inside an unprivileged container. If you prefer the
-full sandbox, enable nesting on the container and re-run `setup.sh`; it removes
+full sandbox, enable nesting on the container and re-run
+`sudo /opt/trackstar/deploy/setup.sh`; it removes
 the drop-in when the probe succeeds.
 
 ## Docker installation
@@ -492,14 +503,14 @@ on this machine), snapshots the database, keeps the old binary as
 on failure restores both the binary and the pre-update snapshot (an older
 binary must not meet a newer schema).
 
-From your workstation: `./scripts/deploy.sh root@192.168.1.240` builds the
+From your workstation: `./deploy/deploy.sh root@192.168.1.240` builds the
 frontend and a Linux binary for the remote architecture, uploads it, snapshots
 the database, stops the service, swaps the binary atomically, starts (migrating
 on startup), verifies `/health`, and rolls back on failure. It never touches
 `/etc/trackstar/trackstar.env`. Non-root SSH users need passwordless sudo.
 To skip typing the host, copy `deploy/deploy.env.example` to `deploy/deploy.env`
 (gitignored, never uploaded), set `DEPLOY_TARGET=user@host.lan`, and run
-`./scripts/deploy.sh` with no target.
+`./deploy/deploy.sh` with no target.
 
 ## API
 
@@ -708,7 +719,7 @@ HTTP request that costs the same as the equivalent API call.
 | Symptom | Cause / fix |
 |---|---|
 | Exits at once with `invalid configuration:` | Every bad `TRACKSTAR_*` value is listed; fix `/etc/trackstar/trackstar.env`. `journalctl -u trackstar -n 50` |
-| `status=226/NAMESPACE` in an LXC | Sandbox needs mount namespaces. Re-run `setup.sh` (installs the drop-in) or enable nesting. |
+| `status=226/NAMESPACE` in an LXC | Sandbox needs mount namespaces. Re-run `sudo /opt/trackstar/deploy/setup.sh` (installs the drop-in) or enable nesting. |
 | Login "works" but you are signed out immediately | `TRACKSTAR_PUBLIC_URL` is `https://…` but you browse over plain `http://` — Secure cookies are not stored. Use the public URL, or set an `http://` URL for LAN-only installs. |
 | `403 cross-origin request rejected` | The page's origin is neither `TRACKSTAR_PUBLIC_URL` nor the request's Host. Fix the public URL; make your reverse proxy pass `Host` through. |
 | Every request logs the proxy's IP | Add the proxy to `TRACKSTAR_TRUSTED_PROXIES`. |

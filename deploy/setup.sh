@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
-# Install Trackstar natively on a fresh Debian/Ubuntu machine (droplet, VM, LXC).
+# Set up a fresh Debian/Ubuntu machine for Trackstar and install it: an LXC
+# (Proxmox or otherwise), a VM or a droplet. Run as root on the machine, or let
+# the deploy do it: deploy/deploy.sh runs this script on its first contact.
 # Safe to re-run: existing configuration, secrets and data are kept.
 #
-#   sudo ./setup.sh --public-url https://track.example.com/ --port 3000
+#   sudo ./deploy/setup.sh --public-url https://track.example.com/ --timezone Europe/Berlin
+#
+# What it does:
+#   * reports what the machine provides (container?, cores, RAM, swap, free
+#     disk) and warns about anything that would bite later
+#   * installs the base packages a slim template may lack, enables SSH and
+#     makes the journal persistent; a first install also runs apt-get upgrade
+#   * optionally sets the time zone and authorizes an SSH public key for root
+#   * installs the application: trackstar user, /etc/trackstar,
+#     /var/lib/trackstar, the binary and the hardened systemd unit (relaxed
+#     only where a container cannot sandbox), then waits for /health
 #
 # The binary comes from (first match wins):
 #   --binary PATH          a trackstar executable
@@ -10,6 +22,8 @@
 #   ../bin/trackstar         when run from a source checkout after `make build`
 #   --release-url URL      a release .tar.gz to download
 #   --repo OWNER/NAME      the latest (or --version TAG) GitHub release
+# With none of these and nothing installed yet, only the system is prepared,
+# ready for a deploy from your workstation.
 set -euo pipefail
 
 PUBLIC_URL=""
@@ -21,6 +35,8 @@ REPO=""
 VERSION="latest"
 TIMEZONE=""
 ALLOW_REGISTRATION=""
+AUTHORIZED_KEY=""
+SKIP_UPGRADE=0
 START=1
 
 BIN_PATH=/usr/local/bin/trackstar
@@ -38,14 +54,18 @@ log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; cat <<'USAGE'
+usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; cat <<'USAGE'
 
 Options:
   --public-url URL            external URL (default http://<this-ip>:<port>/)
   --port N                    listen port (default 3000)
   --bind HOST                 listen host (default 0.0.0.0)
-  --timezone ZONE             IANA zone for iteration boundaries (default UTC)
+  --timezone ZONE             IANA zone for the system clock and for iteration
+                              boundaries (default: system unchanged, iterations in UTC)
   --allow-registration BOOL   true|false (default true)
+  --authorized-key ARG        public key file or literal "ssh-ed25519 …" to append to
+                              /root/.ssh/authorized_keys so deploy.sh can connect
+  --skip-upgrade              do not run apt-get upgrade on a first install
   --binary PATH | --release-url URL | --repo OWNER/NAME [--version TAG]
   --no-start                  install everything but do not start the service
 USAGE
@@ -62,6 +82,8 @@ while [ $# -gt 0 ]; do
     --version) VERSION=${2:?}; shift 2 ;;
     --timezone) TIMEZONE=${2:?}; shift 2 ;;
     --allow-registration) ALLOW_REGISTRATION=${2:?}; shift 2 ;;
+    --authorized-key) AUTHORIZED_KEY=${2:?}; shift 2 ;;
+    --skip-upgrade) SKIP_UPGRADE=1; shift ;;
     --no-start) START=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1 (see --help)" ;;
@@ -93,19 +115,106 @@ case "$(uname -m)" in
   *) die "unsupported CPU architecture $(uname -m)" ;;
 esac
 
-log "Installing on ${PRETTY_NAME} (${ARCH})"
+# --- the machine: describe it, warn about anything that matters later ------------
+
+virt=$(systemd-detect-virt 2>/dev/null || true)
+container=$(systemd-detect-virt --container 2>/dev/null || true)
+case "$container" in
+  none|"") kind=${virt:-none}; [ "$kind" != none ] || kind="bare metal" ;;
+  *)
+    # A full uid map means the container's root is the host's root.
+    if grep -q '^ *0 *0 *4294967295' /proc/self/uid_map 2>/dev/null; then
+      kind="$container container, privileged"
+    else
+      kind="$container container, unprivileged"
+    fi ;;
+esac
+# In an LXC /proc/meminfo shows the container's limits, not the host's.
+mem_mb=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo)
+swap_mb=$(awk '/^SwapTotal:/ {print int($2/1024)}' /proc/meminfo)
+disk_free=$(df -h --output=avail / 2>/dev/null | tail -n1 | tr -d ' ')
+ip_addr=$(hostname -I 2>/dev/null | awk '{print $1}') || true
+
+log "Machine: ${PRETTY_NAME} (${ARCH}), ${kind}, $(nproc) core(s), ${mem_mb} MB RAM, ${swap_mb} MB swap, ${disk_free:-?} free on /"
+if [ "$mem_mb" -lt 200 ]; then
+  warn "under 200 MB of RAM: Trackstar itself needs ~50 MB, but apt upgrades may fail; 256–512 MB is recommended"
+fi
+case "$kind" in
+  *", privileged") warn "privileged container: Trackstar does not need it; unprivileged is the safer default" ;;
+esac
+[ -n "$ip_addr" ] || warn "no IPv4 address yet; a deploy needs to reach this machine over SSH"
 
 # --- packages -------------------------------------------------------------------
 
+# A machine without configuration has not been set up before: bring it up to
+# date once. Re-runs leave the system's packages alone.
+upgrade=0
+[ -f "$ENV_FILE" ] || [ "$SKIP_UPGRADE" -eq 1 ] || upgrade=1
+
+# What this script and the operational scripts rely on, sshd for the deploy,
+# and the usual troubleshooting tools a slim template leaves out.
 missing=()
-for pkg in ca-certificates curl tar; do
+for pkg in ca-certificates curl tar tzdata util-linux procps openssh-server less nano; do
   dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
 done
-if [ ${#missing[@]} -gt 0 ]; then
-  log "Installing packages: ${missing[*]}"
+if [ "$upgrade" -eq 1 ] || [ ${#missing[@]} -gt 0 ]; then
+  if ! getent hosts deb.debian.org >/dev/null 2>&1 && ! getent hosts archive.ubuntu.com >/dev/null 2>&1; then
+    die "DNS resolution failed; fix networking first (check /etc/resolv.conf)"
+  fi
   export DEBIAN_FRONTEND=noninteractive
+  log "Updating package index"
   apt-get update -qq
-  apt-get install -y -qq --no-install-recommends "${missing[@]}" >/dev/null
+  if [ "$upgrade" -eq 1 ]; then
+    log "Upgrading packages (first install; --skip-upgrade to skip)"
+    apt-get upgrade -y -qq >/dev/null
+  fi
+  if [ ${#missing[@]} -gt 0 ]; then
+    log "Installing packages: ${missing[*]}"
+    apt-get install -y -qq --no-install-recommends "${missing[@]}" >/dev/null
+  fi
+fi
+systemctl enable --now ssh >/dev/null 2>&1 || systemctl enable --now sshd >/dev/null 2>&1 || warn "could not enable the SSH service"
+
+# --- system settings ------------------------------------------------------------
+
+if [ ! -d /var/log/journal ]; then
+  log "Making the journal persistent"
+  mkdir -p /var/log/journal
+  systemd-tmpfiles --create --prefix /var/log/journal >/dev/null 2>&1 || true
+  systemctl restart systemd-journald 2>/dev/null || true
+fi
+
+if [ -n "$TIMEZONE" ]; then
+  [ -f "/usr/share/zoneinfo/$TIMEZONE" ] || die "unknown time zone '$TIMEZONE'"
+  log "Setting system time zone to $TIMEZONE"
+  if command -v timedatectl >/dev/null && timedatectl set-timezone "$TIMEZONE" 2>/dev/null; then :; else
+    ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+    echo "$TIMEZONE" > /etc/timezone
+  fi
+fi
+
+if [ -n "$AUTHORIZED_KEY" ]; then
+  if [ -f "$AUTHORIZED_KEY" ]; then
+    key=$(grep -v '^#' "$AUTHORIZED_KEY" | grep -m1 . || true)
+  else
+    key=$AUTHORIZED_KEY
+  fi
+  case "$key" in
+    ssh-*|ecdsa-*|sk-*) ;;
+    *) die "--authorized-key: not an SSH public key" ;;
+  esac
+  install -d -m 0700 /root/.ssh
+  touch /root/.ssh/authorized_keys
+  chmod 0600 /root/.ssh/authorized_keys
+  if grep -qxF "$key" /root/.ssh/authorized_keys; then
+    log "SSH key already authorized for root"
+  else
+    echo "$key" >> /root/.ssh/authorized_keys
+    log "Authorized SSH key for root"
+  fi
+  if sshd -T 2>/dev/null | grep -qi '^permitrootlogin no'; then
+    warn "sshd has PermitRootLogin no; set 'PermitRootLogin prohibit-password' in /etc/ssh/sshd_config and restart ssh"
+  fi
 fi
 
 # --- locate the binary ----------------------------------------------------------
@@ -120,7 +229,7 @@ fetch_release() { # url → extracts into $WORK/release, sets BINARY
   tar -xzf "$WORK/release.tar.gz" -C "$WORK/release" --strip-components=1 --no-same-owner || die "cannot extract the release archive"
   BINARY=$WORK/release/trackstar
   # Prefer the scripts and unit file that ship with the downloaded version.
-  [ -d "$WORK/release/scripts" ] && ROOT_DIR=$WORK/release
+  [ -f "$WORK/release/deploy/trackstar.service" ] && ROOT_DIR=$WORK/release
 }
 
 if [ -z "$BINARY" ]; then
@@ -140,10 +249,22 @@ if [ -z "$BINARY" ]; then
     log "No new binary supplied; keeping the installed $BIN_PATH"
     BINARY=$BIN_PATH
   else
-    die "no trackstar binary found; pass --binary, --release-url or --repo"
+    cat <<DONE
+
+The system is prepared, but there was no trackstar binary to install.
+
+Deploy from your workstation (installs now, swaps the binary afterwards):
+
+  ./deploy/deploy.sh root@${ip_addr:-<this-machine>} -- --public-url https://track.example.com/
+
+or re-run this script with --repo OWNER/NAME, --release-url URL or --binary PATH.
+DONE
+    exit 0
   fi
 fi
 [ -f "$BINARY" ] || die "binary not found: $BINARY"
+[ -f "$ROOT_DIR/deploy/trackstar.service" ] \
+  || die "trackstar.service not found beside this script; run it from a release archive or a checkout, or pass --repo / --release-url"
 NEW_VERSION=$("$BINARY" version 2>/dev/null) || die "$BINARY does not run on this machine (wrong architecture?)"
 log "Trackstar version: $NEW_VERSION"
 
@@ -172,12 +293,22 @@ if [ "$BINARY" != "$BIN_PATH" ]; then
   log "Installed $BIN_PATH"
 fi
 
-for f in "$ROOT_DIR"/scripts/*.sh; do
-  [ -f "$f" ] && install -m 0755 "$f" "$OPT_DIR/scripts/"
-done
-for f in "$ROOT_DIR"/deploy/*; do
-  [ -f "$f" ] && install -m 0644 "$f" "$OPT_DIR/deploy/"
-done
+# Re-run from its installed location, the script has nothing to copy onto itself.
+if [ "$ROOT_DIR" != "$OPT_DIR" ]; then
+  for f in "$ROOT_DIR"/scripts/*.sh; do
+    [ -f "$f" ] && install -m 0755 "$f" "$OPT_DIR/scripts/"
+  done
+  for f in "$ROOT_DIR"/deploy/*; do
+    [ -f "$f" ] || continue
+    case "${f##*/}" in
+      deploy.sh|deploy.env) ;; # workstation side only
+      *.sh) install -m 0755 "$f" "$OPT_DIR/deploy/" ;;
+      *) install -m 0644 "$f" "$OPT_DIR/deploy/" ;;
+    esac
+  done
+fi
+# These lived in scripts/ before they moved to deploy/.
+rm -f "$OPT_DIR/scripts/setup.sh" "$OPT_DIR/scripts/setup-lxc.sh" "$OPT_DIR/scripts/deploy.sh"
 if [ -n "$REPO" ]; then
   printf 'TRACKSTAR_REPO=%s\n' "$REPO" > "$ETC_DIR/release.conf"
 fi
@@ -198,7 +329,6 @@ get_env() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n1; }
 if [ ! -f "$ENV_FILE" ]; then
   log "Creating $ENV_FILE"
   port=${PORT:-3000}
-  host_ip=$(hostname -I 2>/dev/null | awk '{print $1}') || true
   umask 027
   cat > "$ENV_FILE" <<ENV
 # Trackstar configuration. Documented in $OPT_DIR/deploy/trackstar.env.example
@@ -206,7 +336,7 @@ TRACKSTAR_ADDR=${BIND_HOST:-0.0.0.0}:$port
 TRACKSTAR_DATA_DIR=$DATA_DIR
 TRACKSTAR_DATABASE_DRIVER=sqlite
 TRACKSTAR_DATABASE_URL=$DATA_DIR/trackstar.db
-TRACKSTAR_PUBLIC_URL=${PUBLIC_URL:-http://${host_ip:-localhost}:$port/}
+TRACKSTAR_PUBLIC_URL=${PUBLIC_URL:-http://${ip_addr:-localhost}:$port/}
 TRACKSTAR_ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
 TRACKSTAR_SESSION_SECRET=
 TRACKSTAR_LOG_LEVEL=info
@@ -302,7 +432,7 @@ Trackstar $NEW_VERSION is running.
   Data:     $DATA_DIR
   Logs:     journalctl -u trackstar -f
   Backup:   $OPT_DIR/scripts/backup.sh
-  Update:   $OPT_DIR/scripts/update.sh
+  Update:   $OPT_DIR/scripts/update.sh, or ./deploy/deploy.sh root@${ip_addr:-<this-machine>} from a checkout
 
 Open the URL and register: the first account becomes the administrator.
 Afterwards set TRACKSTAR_ALLOW_REGISTRATION=false in $ENV_FILE to close sign-ups.
