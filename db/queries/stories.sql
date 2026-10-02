@@ -133,6 +133,30 @@ JOIN stories ON stories.id = comments.story_id
 WHERE stories.project_id IN (sqlc.slice(project_ids))
 GROUP BY stories.project_id;
 
+-- How much happened in each project on each day since sqlc.arg(since): the
+-- same changes the feed shows, counted. "day" is whole days after since, so
+-- the caller picks the time zone by picking since. since comes first because
+-- of how sqlc numbers what follows a slice (see RecentActivity).
+-- name: ProjectActivityByDay :many
+SELECT CAST((activity.created_at - sqlc.arg(since)) / 86400 AS INTEGER) AS day,
+       stories.project_id, COUNT(*) AS changes
+FROM activity
+JOIN stories ON stories.id = activity.story_id
+WHERE stories.project_id IN (sqlc.slice(project_ids))
+  AND activity.kind NOT IN ('title', 'type')
+  AND activity.created_at >= sqlc.arg(since)
+GROUP BY stories.project_id, day;
+
+-- name: ProjectCommentsByDay :many
+SELECT CAST((comments.created_at - sqlc.arg(since)) / 86400 AS INTEGER) AS day,
+       stories.project_id, COUNT(*) AS comments
+FROM comments
+JOIN stories ON stories.id = comments.story_id
+WHERE stories.project_id IN (sqlc.slice(project_ids))
+  AND stories.deleted_at IS NULL
+  AND comments.created_at >= sqlc.arg(since)
+GROUP BY stories.project_id, day;
+
 -- Newest first across projects. Renames and type changes are edits, not news.
 -- The limit (story.FeedSize) is a literal here and in RecentComments: sqlc
 -- numbers a parameter that follows a slice as if the slice were one value,

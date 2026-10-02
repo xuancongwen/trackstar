@@ -3,8 +3,8 @@ import { blockingSet, matches, parseQuery } from './filter'
 import { makeStory } from './testing'
 import type { User } from './types'
 
-const sam: User = { id: 1, email: 'sam@example.com', display_name: 'Sam Wen', is_admin: true, is_active: true }
-const kim: User = { id: 2, email: 'kim@example.com', display_name: 'Kim Lee', is_admin: false, is_active: true }
+const sam: User = { id: 1, email: 'sam@example.com', display_name: 'Sam Wen', is_admin: true, is_active: true, default_combine_icebox_backlog: false }
+const kim: User = { id: 2, email: 'kim@example.com', display_name: 'Kim Lee', is_admin: false, is_active: true, default_combine_icebox_backlog: false }
 const ctx = { me: sam, users: new Map([[1, sam], [2, kim]]) }
 const run = (query: string, story: Parameters<typeof makeStory>[0]) => matches(makeStory(story), parseQuery(query), ctx)
 

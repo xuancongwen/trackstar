@@ -135,3 +135,66 @@ func TestProjectStatsAndRecentActivity(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectStatsCountActivityPerDay(t *testing.T) {
+	f := setup(t) // the clock starts on 2026-01-05 at 09:00 UTC
+	ids := []int64{f.project.ID}
+	days := func() []int64 {
+		t.Helper()
+		stats, err := f.svc.ProjectStats(f.ctx, ids)
+		if err != nil || len(stats) != 1 || len(stats[0].Activity) != story.ActivityDays {
+			t.Fatalf("stats = %+v, %v", stats, err)
+		}
+		return stats[0].Activity
+	}
+	sum := func(days []int64) (n int64) {
+		for _, d := range days {
+			n += d
+		}
+		return n
+	}
+	today := story.ActivityDays - 1
+
+	// Day one: two stories created, one started (which also assigns it), one
+	// renamed (an edit, not counted), one comment.
+	a := f.create(t, "A", story.SectionCurrent, 1)
+	f.create(t, "B", story.SectionBacklog, 1)
+	f.setState(t, a.ID, story.StateStarted)
+	renamed := "A, renamed"
+	if _, err := f.svc.Update(f.ctx, a.ID, story.Actor{ID: f.user}, story.UpdateInput{Title: &renamed}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.AddComment(f.ctx, a.ID, f.user, "Hello"); err != nil {
+		t.Fatal(err)
+	}
+	feed, _ := f.svc.RecentActivity(f.ctx, ids)
+	first := int64(len(feed)) // the chart counts exactly what the feed lists
+	if got := days(); got[today] != first || sum(got) != first || first < 4 {
+		t.Fatalf("day one = %v, want %d in the last slot only", got, first)
+	}
+
+	// Late the same evening still counts as today; after midnight it is yesterday.
+	f.clock.Advance(14*time.Hour + 59*time.Minute) // 23:59
+	if got := days(); got[today] != first {
+		t.Fatalf("23:59 = %v", got)
+	}
+	f.clock.Advance(2 * time.Minute) // 00:01 on the 6th
+	if got := days(); got[today] != 0 || got[today-1] != first {
+		t.Fatalf("after midnight = %v, want %d moved to yesterday", got, first)
+	}
+
+	// Two days on, a comment lands in the new today.
+	f.clock.Advance(48 * time.Hour)
+	if _, err := f.svc.AddComment(f.ctx, a.ID, f.user, "Again"); err != nil {
+		t.Fatal(err)
+	}
+	if got := days(); got[today] != 1 || got[today-3] != first || sum(got) != first+1 {
+		t.Fatalf("three days later = %v", got)
+	}
+
+	// Old activity falls off the far end; the project still has stats.
+	f.clock.Advance(time.Duration(story.ActivityDays) * 24 * time.Hour)
+	if got := days(); sum(got) != 0 {
+		t.Fatalf("after the window = %v, want all zero", got)
+	}
+}

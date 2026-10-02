@@ -159,12 +159,13 @@ type Task struct {
 }
 
 type User struct {
-	ID           int64
-	Email        string
-	PasswordHash string
-	DisplayName  string
-	IsAdmin      bool
-	CreatedAt    int64
-	UpdatedAt    int64
-	IsActive     bool
+	ID                          int64
+	Email                       string
+	PasswordHash                string
+	DisplayName                 string
+	IsAdmin                     bool
+	CreatedAt                   int64
+	UpdatedAt                   int64
+	IsActive                    bool
+	DefaultCombineIceboxBacklog bool
 }

@@ -16,6 +16,7 @@ try {
   const api = apiClient(trackstar.base, sam.cookie)
   const project = await seed(api) // 8 stories created in Apollo, "Set up CI" started
   await api('POST', '/api/projects', { name: 'Quiet' })
+  await api('POST', '/api/projects', { name: 'Aardvark' }) // first by name, but nothing happens in it
   const hidden = await apiClient(trackstar.base, kim.cookie)('POST', '/api/projects', { name: "Kim's own" })
   await apiClient(trackstar.base, kim.cookie)('POST', `/api/projects/${hidden.id}/stories`, { title: 'Not for Sam' })
 
@@ -49,10 +50,17 @@ try {
 
   const page = await open(null)
   const rows = await page.$$eval('main > ul li a', (els) => els.map((a) => [a.querySelector('strong').textContent, a.querySelector('.summary').textContent, a.getAttribute('href')]))
-  t.eq('each project says what is going on in it', rows, [
+  t.eq('each project says what is going on in it, the busiest first', rows, [
     ['Apollo', '1 in progress · 1 to accept · just now', '#/p/apollo'],
+    ['Aardvark', 'no activity yet', '#/p/aardvark'],
     ['Quiet', 'no activity yet', '#/p/quiet'],
   ])
+  // 8 created, two stories started (each also assigns its owner), then
+  // finished, delivered, assigned and commented on.
+  const sparks = await page.$$eval('main > ul li svg.spark', (els) =>
+    els.map((e) => [e.getAttribute('aria-label'), e.querySelectorAll('rect:not(.hit)').length, e.querySelectorAll('rect:not(.hit):not(.none)').length, e.querySelector('rect.hit:last-of-type title').textContent.replace(/^.*: /, '')]),
+  )
+  t.eq('a project with stories charts its last 30 days, today at the right', sparks, [['16 changes in the last 30 days', 30, 1, '16 changes']])
   const feed = await page.$$eval('.feed li a', (els) => els.map((a) => [...a.querySelectorAll('.what, .where')].map((e) => e.innerText.replace(/\s+/g, ' ').trim())))
   t.eq('feed is newest first and reads as sentences', feed, [
     ['Sam commented on Add OAuth support', 'Apollo · just now'],
@@ -67,6 +75,29 @@ try {
   ])
   t.eq('a comment shows what was said', await page.$eval('.feed .quote', (e) => e.textContent.startsWith('Check the wording.') && e.textContent.endsWith('…')), true)
   t.eq('nothing from a project Sam cannot see', await page.$eval('main', (e) => e.innerText.includes("Kim's own") || e.innerText.includes('Not for Sam')), false)
+
+  // Search narrows the list as you type; Enter opens a project only when it is the one match.
+  const names = () => page.$$eval('main > ul li a strong', (els) => els.map((e) => e.textContent))
+  await page.keyboard.press('/')
+  t.eq('/ focuses the search box', await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Search projects')
+  await page.keyboard.type('A')
+  t.eq('typing filters by name, ignoring case', await names(), ['Apollo', 'Aardvark'])
+  await page.keyboard.press('Enter')
+  t.eq('Enter does nothing while several projects match', await page.evaluate(() => location.hash), '')
+  await page.keyboard.type('zz')
+  t.eq('nothing matches', [await names(), await page.$eval('main [role="status"]', (e) => e.textContent)], [[], 'No project matches “Azz”.'])
+  await page.keyboard.press('Enter')
+  t.eq('Enter does nothing when nothing matches', await page.evaluate(() => location.hash), '')
+  await page.keyboard.press('Escape')
+  t.eq('Esc clears the search', [await page.$eval('input.search', (e) => e.value), (await names()).length], ['', 3])
+  await page.keyboard.press('/')
+  await page.keyboard.type('uie')
+  t.eq('one project left', await names(), ['Quiet'])
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(() => location.hash === '#/p/quiet')
+  t.eq('Enter opens the only match', await page.evaluate(() => location.hash), '#/p/quiet')
+  await page.goto(trackstar.base + '/#/', { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('section[aria-label="Recent activity"] li')
 
   // The account menu is on this page too, not only on a board.
   const menuItems = async (p) => {
@@ -85,6 +116,14 @@ try {
   await page.click('form[aria-label="Account"] button.primary')
   await page.waitForFunction(() => document.querySelector('header .who').textContent === 'Samantha')
   t.eq('a new display name reaches the feed', await page.$eval('.feed .what strong', (e) => e.textContent), 'Samantha')
+  // A personal default for the projects you create, set in the same dialog.
+  await page.evaluate(() => [...document.querySelectorAll('form[aria-label="Account"] label.check')].find((l) => l.textContent.includes('Combine icebox')).querySelector('input').click())
+  await page.click('form[aria-label="Account"] button.primary')
+  await page.waitForFunction(() => document.querySelector('form[aria-label="Account"] [role="status"]')?.textContent === 'Saved.')
+  t.eq('the preference is stored on the account', (await api('GET', '/api/me')).default_combine_icebox_backlog, true)
+  t.eq('a project created afterwards starts combined', (await api('POST', '/api/projects', { name: 'Combined' })).combine_icebox_backlog, true)
+  t.eq('existing projects keep their setting', (await api('GET', '/api/projects/apollo')).combine_icebox_backlog, false)
+  await api('DELETE', '/api/projects/combined')
   await page.keyboard.press('Escape')
   t.eq('Esc closes the account dialog', await page.$('form[aria-label="Account"]'), null)
   await api('PATCH', '/api/me', { display_name: 'Sam' })

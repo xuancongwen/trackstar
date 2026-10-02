@@ -103,6 +103,12 @@ type Querier interface {
 	ListTasks(ctx context.Context, storyID int64) ([]Task, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	MaxTaskPosition(ctx context.Context, storyID int64) (interface{}, error)
+	// How much happened in each project on each day since sqlc.arg(since): the
+	// same changes the feed shows, counted. "day" is whole days after since, so
+	// the caller picks the time zone by picking since. since comes first because
+	// of how sqlc numbers what follows a slice (see RecentActivity).
+	ProjectActivityByDay(ctx context.Context, arg ProjectActivityByDayParams) ([]ProjectActivityByDayRow, error)
+	ProjectCommentsByDay(ctx context.Context, arg ProjectCommentsByDayParams) ([]ProjectCommentsByDayRow, error)
 	// A comment does not touch its story's updated_at.
 	ProjectLastComment(ctx context.Context, projectIds []int64) ([]ProjectLastCommentRow, error)
 	// Per project: stories being worked on, stories delivered and waiting for
@@ -123,6 +129,7 @@ type Querier interface {
 	SetProjectArchived(ctx context.Context, arg SetProjectArchivedParams) (Project, error)
 	SetStoryDeleted(ctx context.Context, arg SetStoryDeletedParams) error
 	SetStoryPosition(ctx context.Context, arg SetStoryPositionParams) error
+	SetUserDefaultCombineIceboxBacklog(ctx context.Context, arg SetUserDefaultCombineIceboxBacklogParams) (User, error)
 	TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error
 	TouchOAuthClient(ctx context.Context, arg TouchOAuthClientParams) error
 	TouchOAuthGrant(ctx context.Context, arg TouchOAuthGrantParams) error

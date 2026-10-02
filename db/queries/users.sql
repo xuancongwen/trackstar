@@ -48,5 +48,12 @@ SET display_name = sqlc.arg(display_name),
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
+-- name: SetUserDefaultCombineIceboxBacklog :one
+UPDATE users
+SET default_combine_icebox_backlog = sqlc.arg(default_combine_icebox_backlog),
+    updated_at = sqlc.arg(now)
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
 -- name: CountActiveAdmins :one
 SELECT COUNT(*) FROM users WHERE is_admin AND is_active;

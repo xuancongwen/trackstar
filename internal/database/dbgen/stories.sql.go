@@ -533,6 +533,122 @@ func (q *Queries) ListSectionPositions(ctx context.Context, arg ListSectionPosit
 	return items, nil
 }
 
+const projectActivityByDay = `-- name: ProjectActivityByDay :many
+SELECT CAST((activity.created_at - ?1) / 86400 AS INTEGER) AS day,
+       stories.project_id, COUNT(*) AS changes
+FROM activity
+JOIN stories ON stories.id = activity.story_id
+WHERE stories.project_id IN (/*SLICE:project_ids*/?)
+  AND activity.kind NOT IN ('title', 'type')
+  AND activity.created_at >= ?1
+GROUP BY stories.project_id, day
+`
+
+type ProjectActivityByDayParams struct {
+	Since      int64
+	ProjectIds []int64
+}
+
+type ProjectActivityByDayRow struct {
+	Day       int64
+	ProjectID int64
+	Changes   int64
+}
+
+// How much happened in each project on each day since sqlc.arg(since): the
+// same changes the feed shows, counted. "day" is whole days after since, so
+// the caller picks the time zone by picking since. since comes first because
+// of how sqlc numbers what follows a slice (see RecentActivity).
+func (q *Queries) ProjectActivityByDay(ctx context.Context, arg ProjectActivityByDayParams) ([]ProjectActivityByDayRow, error) {
+	query := projectActivityByDay
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.Since)
+	if len(arg.ProjectIds) > 0 {
+		for _, v := range arg.ProjectIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:project_ids*/?", strings.Repeat(",?", len(arg.ProjectIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:project_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProjectActivityByDayRow{}
+	for rows.Next() {
+		var i ProjectActivityByDayRow
+		if err := rows.Scan(&i.Day, &i.ProjectID, &i.Changes); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const projectCommentsByDay = `-- name: ProjectCommentsByDay :many
+SELECT CAST((comments.created_at - ?1) / 86400 AS INTEGER) AS day,
+       stories.project_id, COUNT(*) AS comments
+FROM comments
+JOIN stories ON stories.id = comments.story_id
+WHERE stories.project_id IN (/*SLICE:project_ids*/?)
+  AND stories.deleted_at IS NULL
+  AND comments.created_at >= ?1
+GROUP BY stories.project_id, day
+`
+
+type ProjectCommentsByDayParams struct {
+	Since      int64
+	ProjectIds []int64
+}
+
+type ProjectCommentsByDayRow struct {
+	Day       int64
+	ProjectID int64
+	Comments  int64
+}
+
+func (q *Queries) ProjectCommentsByDay(ctx context.Context, arg ProjectCommentsByDayParams) ([]ProjectCommentsByDayRow, error) {
+	query := projectCommentsByDay
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.Since)
+	if len(arg.ProjectIds) > 0 {
+		for _, v := range arg.ProjectIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:project_ids*/?", strings.Repeat(",?", len(arg.ProjectIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:project_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProjectCommentsByDayRow{}
+	for rows.Next() {
+		var i ProjectCommentsByDayRow
+		if err := rows.Scan(&i.Day, &i.ProjectID, &i.Comments); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const projectLastComment = `-- name: ProjectLastComment :many
 SELECT stories.project_id, CAST(MAX(comments.created_at) AS INTEGER) AS last_comment_at
 FROM comments

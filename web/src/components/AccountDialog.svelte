@@ -12,6 +12,8 @@
 
   // svelte-ignore state_referenced_locally
   let displayName = $state(user.display_name)
+  // svelte-ignore state_referenced_locally
+  let combineByDefault = $state(user.default_combine_icebox_backlog)
   let currentPassword = $state('')
   let newPassword = $state('')
   let error = $state('')
@@ -97,6 +99,7 @@
     saved = ''
     const input: Parameters<typeof api.updateMe>[0] = {}
     if (displayName.trim() !== user.display_name) input.display_name = displayName
+    if (combineByDefault !== user.default_combine_icebox_backlog) input.default_combine_icebox_backlog = combineByDefault
     if (newPassword) {
       input.current_password = currentPassword
       input.new_password = newPassword
@@ -120,6 +123,17 @@
     <h2>Account</h2>
     <p class="muted">{user.email}{user.is_admin ? ' · administrator' : ''}</p>
     <label class="field"><span>Display name</span><input bind:value={displayName} required maxlength="100" /></label>
+    <fieldset>
+      <legend>New projects</legend>
+      <label class="check">
+        <input type="checkbox" bind:checked={combineByDefault} />
+        <span>Combine icebox and backlog</span>
+      </label>
+      <p class="muted small">
+        Projects you create from now on start with one panel for both. Existing projects keep their own setting, and
+        each project can still be changed under Settings.
+      </p>
+    </fieldset>
     <fieldset>
       <legend>Change password</legend>
       <label class="field">
@@ -229,6 +243,15 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--muted);
+  }
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+  }
+  .check input {
+    margin: 0;
   }
   .ok {
     color: var(--accept);

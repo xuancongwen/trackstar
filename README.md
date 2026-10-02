@@ -43,13 +43,18 @@ The first account you register becomes the administrator. The projects page
 lists your projects with what is going on in each (stories in progress,
 stories delivered and waiting to be accepted, when it was last active) and,
 below, the recent activity across them: who started, finished, estimated or
-commented on what. Create a project and you land on the board:
+commented on what. Each project carries a small chart of its last 30 days,
+and the busiest projects come first. Type in the search box (`/` jumps to it)
+to narrow the list; when one project is left, Enter opens it. Create a
+project and you land on the board:
 
 - **Icebox** – ideas. **Backlog** – prioritised work. **Current iteration** –
   what is being worked on now. **Done** (toggle) – accepted work by iteration.
   The project setting *Combine icebox and backlog* shows the icebox at the
   bottom of the backlog panel, under an *Icebox* divider, for a two-column
-  board; stories keep their section.
+  board; stories keep their section. To have every project you create start
+  that way, tick *Combine icebox and backlog* under *your name ▸ Account ▸
+  New projects*.
 - Drag rows to prioritise, or drag them between panels. Work that is in
   progress (started/finished/delivered/rejected) stays in the current iteration.
 - Each row has the one button that matters next: Start → Finish → Deliver →

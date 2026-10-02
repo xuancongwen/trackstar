@@ -104,12 +104,20 @@ func NewService(store database.Store, now func() time.Time) *Service {
 // Create makes a project owned by ownerID, so it is visible only to its
 // members from the start. An ownerID of 0 leaves the project without members,
 // which keeps it open to everyone (as projects created before ownership
-// existed are).
+// existed are). Settings the input leaves out take the owner's personal
+// defaults where they have one.
 func (s *Service) Create(ctx context.Context, ownerID int64, in Input) (Project, error) {
 	p := Project{
 		IterationLengthDays:   DefaultIterationLengthDays,
 		IterationStartWeekday: DefaultStartWeekday,
 		VelocityWindow:        DefaultVelocityWindow,
+	}
+	if ownerID != 0 {
+		owner, err := s.store.GetUser(ctx, ownerID)
+		if err != nil {
+			return Project{}, notFoundErr(err, "user")
+		}
+		p.CombineIceboxBacklog = owner.DefaultCombineIceboxBacklog
 	}
 	if err := apply(&p, in); err != nil {
 		return Project{}, err

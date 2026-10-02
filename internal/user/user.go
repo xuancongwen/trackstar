@@ -18,6 +18,9 @@ type User struct {
 	IsAdmin     bool      `json:"is_admin"`
 	IsActive    bool      `json:"is_active"`
 	CreatedAt   time.Time `json:"created_at"`
+	// DefaultCombineIceboxBacklog is a personal preference: projects this user
+	// creates start with the icebox and backlog in one panel.
+	DefaultCombineIceboxBacklog bool `json:"default_combine_icebox_backlog"`
 }
 
 // FromRow converts a database row, dropping the password hash.
@@ -29,6 +32,8 @@ func FromRow(r dbgen.User) User {
 		IsAdmin:     r.IsAdmin,
 		IsActive:    r.IsActive,
 		CreatedAt:   time.Unix(r.CreatedAt, 0).UTC(),
+
+		DefaultCombineIceboxBacklog: r.DefaultCombineIceboxBacklog,
 	}
 }
 
@@ -83,6 +88,18 @@ func (s *Service) Rename(ctx context.Context, id int64, displayName string) (Use
 	})
 	if err != nil {
 		return User{}, err
+	}
+	return FromRow(row), nil
+}
+
+// SetDefaultCombineIceboxBacklog changes the caller's preference for the
+// projects they create from now on.
+func (s *Service) SetDefaultCombineIceboxBacklog(ctx context.Context, id int64, on bool) (User, error) {
+	row, err := s.store.SetUserDefaultCombineIceboxBacklog(ctx, dbgen.SetUserDefaultCombineIceboxBacklogParams{
+		ID: id, DefaultCombineIceboxBacklog: on, Now: s.now().Unix(),
+	})
+	if err != nil {
+		return User{}, notFound(err)
 	}
 	return FromRow(row), nil
 }

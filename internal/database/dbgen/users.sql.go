@@ -56,7 +56,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name, is_admin, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5, ?5)
-RETURNING id, email, password_hash, display_name, is_admin, created_at, updated_at, is_active
+RETURNING id, email, password_hash, display_name, is_admin, created_at, updated_at, is_active, default_combine_icebox_backlog
 `
 
 type CreateUserParams struct {
@@ -85,6 +85,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.IsActive,
+		&i.DefaultCombineIceboxBacklog,
 	)
 	return i, err
 }
@@ -117,7 +118,7 @@ func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) error {
 }
 
 const getSessionUser = `-- name: GetSessionUser :one
-SELECT users.id, users.email, users.password_hash, users.display_name, users.is_admin, users.created_at, users.updated_at, users.is_active
+SELECT users.id, users.email, users.password_hash, users.display_name, users.is_admin, users.created_at, users.updated_at, users.is_active, users.default_combine_icebox_backlog
 FROM sessions
 JOIN users ON users.id = sessions.user_id
 WHERE sessions.token_hash = ?1
@@ -142,12 +143,13 @@ func (q *Queries) GetSessionUser(ctx context.Context, arg GetSessionUserParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.IsActive,
+		&i.DefaultCombineIceboxBacklog,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, email, password_hash, display_name, is_admin, created_at, updated_at, is_active FROM users WHERE id = ?1
+SELECT id, email, password_hash, display_name, is_admin, created_at, updated_at, is_active, default_combine_icebox_backlog FROM users WHERE id = ?1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
@@ -162,12 +164,13 @@ func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.IsActive,
+		&i.DefaultCombineIceboxBacklog,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, is_admin, created_at, updated_at, is_active FROM users WHERE email = ?1
+SELECT id, email, password_hash, display_name, is_admin, created_at, updated_at, is_active, default_combine_icebox_backlog FROM users WHERE email = ?1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -182,12 +185,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.IsActive,
+		&i.DefaultCombineIceboxBacklog,
 	)
 	return i, err
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, password_hash, display_name, is_admin, created_at, updated_at, is_active FROM users ORDER BY display_name, id
+SELECT id, email, password_hash, display_name, is_admin, created_at, updated_at, is_active, default_combine_icebox_backlog FROM users ORDER BY display_name, id
 `
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
@@ -208,6 +212,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.IsActive,
+			&i.DefaultCombineIceboxBacklog,
 		); err != nil {
 			return nil, err
 		}
@@ -222,6 +227,37 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const setUserDefaultCombineIceboxBacklog = `-- name: SetUserDefaultCombineIceboxBacklog :one
+UPDATE users
+SET default_combine_icebox_backlog = ?1,
+    updated_at = ?2
+WHERE id = ?3
+RETURNING id, email, password_hash, display_name, is_admin, created_at, updated_at, is_active, default_combine_icebox_backlog
+`
+
+type SetUserDefaultCombineIceboxBacklogParams struct {
+	DefaultCombineIceboxBacklog bool
+	Now                         int64
+	ID                          int64
+}
+
+func (q *Queries) SetUserDefaultCombineIceboxBacklog(ctx context.Context, arg SetUserDefaultCombineIceboxBacklogParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, setUserDefaultCombineIceboxBacklog, arg.DefaultCombineIceboxBacklog, arg.Now, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.IsAdmin,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IsActive,
+		&i.DefaultCombineIceboxBacklog,
+	)
+	return i, err
+}
+
 const updateUser = `-- name: UpdateUser :one
 UPDATE users
 SET display_name = ?1,
@@ -229,7 +265,7 @@ SET display_name = ?1,
     is_active = ?3,
     updated_at = ?4
 WHERE id = ?5
-RETURNING id, email, password_hash, display_name, is_admin, created_at, updated_at, is_active
+RETURNING id, email, password_hash, display_name, is_admin, created_at, updated_at, is_active, default_combine_icebox_backlog
 `
 
 type UpdateUserParams struct {
@@ -258,6 +294,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.IsActive,
+		&i.DefaultCombineIceboxBacklog,
 	)
 	return i, err
 }

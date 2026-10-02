@@ -190,7 +190,7 @@ func (q *Queries) DeleteUserOAuthGrants(ctx context.Context, userID int64) error
 }
 
 const getOAuthAccessTokenUser = `-- name: GetOAuthAccessTokenUser :one
-SELECT oauth_grants.id AS grant_id, oauth_grants.last_used_at, users.id, users.email, users.password_hash, users.display_name, users.is_admin, users.created_at, users.updated_at, users.is_active
+SELECT oauth_grants.id AS grant_id, oauth_grants.last_used_at, users.id, users.email, users.password_hash, users.display_name, users.is_admin, users.created_at, users.updated_at, users.is_active, users.default_combine_icebox_backlog
 FROM oauth_tokens
 JOIN oauth_grants ON oauth_grants.id = oauth_tokens.grant_id
 JOIN users ON users.id = oauth_grants.user_id
@@ -225,6 +225,7 @@ func (q *Queries) GetOAuthAccessTokenUser(ctx context.Context, arg GetOAuthAcces
 		&i.User.CreatedAt,
 		&i.User.UpdatedAt,
 		&i.User.IsActive,
+		&i.User.DefaultCombineIceboxBacklog,
 	)
 	return i, err
 }
@@ -269,7 +270,7 @@ func (q *Queries) GetOAuthCode(ctx context.Context, codeHash string) (OauthCode,
 }
 
 const getOAuthGrantUser = `-- name: GetOAuthGrantUser :one
-SELECT users.id, users.email, users.password_hash, users.display_name, users.is_admin, users.created_at, users.updated_at, users.is_active
+SELECT users.id, users.email, users.password_hash, users.display_name, users.is_admin, users.created_at, users.updated_at, users.is_active, users.default_combine_icebox_backlog
 FROM oauth_grants
 JOIN users ON users.id = oauth_grants.user_id
 WHERE oauth_grants.id = ?1
@@ -287,6 +288,7 @@ func (q *Queries) GetOAuthGrantUser(ctx context.Context, id int64) (User, error)
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.IsActive,
+		&i.DefaultCombineIceboxBacklog,
 	)
 	return i, err
 }

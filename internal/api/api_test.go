@@ -340,3 +340,61 @@ func TestLoginRateLimit(t *testing.T) {
 		t.Fatalf("status after 25 attempts = %d, want 429", last)
 	}
 }
+
+func TestNewProjectsTakeTheCreatorsDefault(t *testing.T) {
+	_, ts := newServer(t, true)
+	sam := newClient(t, ts)
+	sam.register("sam@example.com")
+	kim := newClient(t, ts)
+	kim.register("kim@example.com")
+
+	type me struct {
+		DefaultCombineIceboxBacklog bool `json:"default_combine_icebox_backlog"`
+	}
+	type proj struct {
+		ID                   int64 `json:"id"`
+		CombineIceboxBacklog bool  `json:"combine_icebox_backlog"`
+	}
+	create := func(c *client, body map[string]any) proj {
+		t.Helper()
+		var p proj
+		c.must(http.StatusCreated, "POST", "/api/projects", body, &p)
+		return p
+	}
+
+	before := create(sam, map[string]any{"name": "Before"})
+	if before.CombineIceboxBacklog {
+		t.Fatal("the preference is off until the user turns it on")
+	}
+
+	var got me
+	sam.must(http.StatusOK, "PATCH", "/api/me", map[string]any{"default_combine_icebox_backlog": true}, &got)
+	if !got.DefaultCombineIceboxBacklog {
+		t.Fatal("PATCH /api/me did not return the new preference")
+	}
+	got = me{}
+	sam.must(http.StatusOK, "GET", "/api/me", nil, &got)
+	if !got.DefaultCombineIceboxBacklog {
+		t.Fatal("the preference was not stored")
+	}
+	// Changing something else leaves it alone.
+	sam.must(http.StatusOK, "PATCH", "/api/me", map[string]any{"display_name": "Samantha"}, &got)
+	if !got.DefaultCombineIceboxBacklog {
+		t.Fatal("renaming reset the preference")
+	}
+
+	if !create(sam, map[string]any{"name": "After"}).CombineIceboxBacklog {
+		t.Fatal("a new project did not take its creator's default")
+	}
+	if create(sam, map[string]any{"name": "Explicit", "combine_icebox_backlog": false}).CombineIceboxBacklog {
+		t.Fatal("an explicit value must win over the default")
+	}
+	if create(kim, map[string]any{"name": "Kim's"}).CombineIceboxBacklog {
+		t.Fatal("one user's default leaked into another user's project")
+	}
+	var again proj
+	sam.must(http.StatusOK, "GET", "/api/projects/before", nil, &again)
+	if again.CombineIceboxBacklog {
+		t.Fatal("an existing project was changed")
+	}
+}

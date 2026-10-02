@@ -5,6 +5,7 @@
   import { timeAgo } from '../lib/format'
   import type { Project, ProjectStats, User } from '../lib/types'
   import AccountDialog from './AccountDialog.svelte'
+  import ActivitySpark from './ActivitySpark.svelte'
   import UsersDialog from './UsersDialog.svelte'
 
   let { user, onlogout, onuserchanged }: { user: User; onlogout: () => void; onuserchanged: (user: User) => void } = $props()
@@ -14,8 +15,18 @@
   let showUsers = $state(false)
 
   let projects = $state<Project[]>([])
-  let active = $derived(projects.filter((p) => !p.archived_at))
+  // Busiest first: the server lists projects by name, and the sort is stable,
+  // so equally busy (or equally quiet) projects stay in name order.
+  let active = $derived(projects.filter((p) => !p.archived_at).sort((a, b) => recentChanges(b) - recentChanges(a)))
   let archived = $derived(projects.filter((p) => p.archived_at))
+
+  // Typing narrows both lists by name; Enter opens the only project left.
+  let search = $state('')
+  let searchInput = $state<HTMLInputElement>()
+  let needle = $derived(search.trim().toLowerCase())
+  const matching = (list: Project[]) => (needle ? list.filter((p) => p.name.toLowerCase().includes(needle)) : list)
+  let shownActive = $derived(matching(active))
+  let shownArchived = $derived(matching(archived))
   let loaded = $state(false)
   let name = $state('')
   let error = $state('')
@@ -28,6 +39,7 @@
   let userList = $state<User[]>([])
   let users = $derived(new Map(userList.map((u) => [u.id, u])))
   let projectsById = $derived(new Map(projects.map((p) => [p.id, p])))
+  const recentChanges = (p: Project) => (stats.get(p.id)?.activity ?? []).reduce((a, b) => a + b, 0)
   const userName = (id: string | number) => users.get(Number(id))?.display_name ?? 'Someone'
 
   onMount(async () => {
@@ -77,12 +89,28 @@
     userList = userList.map((x) => (x.id === u.id ? u : x))
   }
 
+  function onSearchKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Enter') return
+    const found = [...shownActive, ...shownArchived]
+    if (needle && found.length === 1) location.hash = `#/p/${found[0].slug}`
+  }
+
   function onKeydown(event: KeyboardEvent) {
+    const target = event.target as HTMLElement
+    const typing = target.matches('input, textarea, select') || target.isContentEditable
+    if (event.key === '/' && !typing && !showAccount && !showUsers && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      searchInput?.focus()
+      event.preventDefault()
+      return
+    }
     if (event.key !== 'Escape') return
     if (menuOpen) menuOpen = false
     else if (showAccount) showAccount = false
     else if (showUsers) showUsers = false
-    else return
+    else if (search || target === searchInput) {
+      search = ''
+      searchInput?.blur()
+    } else return
     event.preventDefault()
   }
 </script>
@@ -111,27 +139,46 @@
 </header>
 
 <main>
-  <h1>Projects</h1>
+  <div class="head">
+    <h1>Projects</h1>
+    {#if projects.length > 0}
+      <input
+        class="search"
+        type="search"
+        bind:value={search}
+        bind:this={searchInput}
+        onkeydown={onSearchKeydown}
+        placeholder="Search projects  ( / )"
+        aria-label="Search projects"
+        enterkeyhint="go"
+      />
+    {/if}
+  </div>
   {#if loaded && projects.length === 0}
     <p class="muted">No projects yet. Create the first one below.</p>
+  {:else if loaded && needle && shownActive.length + shownArchived.length === 0}
+    <p class="muted" role="status">No project matches “{search.trim()}”.</p>
   {:else if loaded && active.length === 0}
     <p class="muted">No active projects. Create one below, or unarchive one from its settings.</p>
   {/if}
+  <!-- Not before the overview is in: the order depends on it. -->
   <ul>
-    {#each active as p (p.id)}
+    {#each loaded ? shownActive : [] as p (p.id)}
       <li>
         <a href={`#/p/${p.slug}`}>
           <strong>{p.name}</strong>
-          <span class="muted summary">{loaded ? summary(p) || 'no activity yet' : ''}</span>
+          <span class="muted summary">{summary(p) || 'no activity yet'}</span>
+          {#if stats.get(p.id)}<ActivitySpark days={stats.get(p.id)!.activity} />{/if}
         </a>
       </li>
     {/each}
   </ul>
-  {#if archived.length > 0}
-    <details class="archived">
-      <summary>Archived ({archived.length})</summary>
+  {#if shownArchived.length > 0}
+    <!-- A search that finds an archived project should not leave it folded away. -->
+    <details class="archived" open={needle !== ''}>
+      <summary>Archived ({shownArchived.length})</summary>
       <ul>
-        {#each archived as p (p.id)}
+        {#each shownArchived as p (p.id)}
           <li>
             <a href={`#/p/${p.slug}`}>
               <strong>{p.name}</strong>
@@ -250,8 +297,19 @@
     margin: 28px auto;
     padding: 0 14px calc(28px + env(safe-area-inset-bottom, 0px));
   }
+  .head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px 12px;
+  }
   h1 {
     font-size: 18px;
+  }
+  .search {
+    flex: 0 1 220px;
+    min-width: 0;
   }
   h2 {
     font-size: 11px;
@@ -269,6 +327,7 @@
   li a {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     gap: 12px;
     padding: 10px 12px;
     background: var(--row);
@@ -284,6 +343,9 @@
   .story,
   .quote {
     overflow-wrap: anywhere;
+  }
+  li a strong {
+    flex: 1;
   }
   .summary {
     flex: none;
@@ -324,10 +386,14 @@
   @media (max-width: 480px) {
     ul li a {
       flex-direction: column;
+      align-items: flex-start;
       gap: 2px;
     }
     .summary {
       text-align: left;
+    }
+    .search {
+      flex-basis: 100%;
     }
   }
   details.archived {

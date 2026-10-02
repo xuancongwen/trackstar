@@ -20,6 +20,8 @@ export interface User {
   display_name: string
   is_admin: boolean
   is_active: boolean
+  /** Personal preference: projects this user creates start with icebox and backlog combined. */
+  default_combine_icebox_backlog: boolean
 }
 
 /** A personal API token as listed; the secret is only in CreatedToken.token. */
@@ -159,6 +161,8 @@ export interface ProjectStats {
   /** Delivered stories waiting for a decision. */
   to_accept: number
   last_activity_at: string | null
+  /** Story changes and comments per day, oldest first; the last entry is today. */
+  activity: number[]
 }
 
 /** One line of the cross-project feed: a story change (an Activity kind) or a comment. */

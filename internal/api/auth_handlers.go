@@ -115,12 +115,14 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, users)
 }
 
-// handleUpdateMe changes the caller's display name and/or password.
+// handleUpdateMe changes the caller's display name, password and/or preferences.
 func (s *Server) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		DisplayName     *string `json:"display_name"`
 		CurrentPassword string  `json:"current_password"`
 		NewPassword     string  `json:"new_password"`
+
+		DefaultCombineIceboxBacklog *bool `json:"default_combine_icebox_backlog"`
 	}
 	if err := decode(w, r, &in); err != nil {
 		s.fail(w, r, err)
@@ -135,6 +137,14 @@ func (s *Server) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.DisplayName != nil {
 		u, err := s.Users.Rename(r.Context(), me.ID, *in.DisplayName)
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		me = u
+	}
+	if in.DefaultCombineIceboxBacklog != nil {
+		u, err := s.Users.SetDefaultCombineIceboxBacklog(r.Context(), me.ID, *in.DefaultCombineIceboxBacklog)
 		if err != nil {
 			s.fail(w, r, err)
 			return

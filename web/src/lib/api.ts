@@ -60,8 +60,12 @@ export const api = {
   register: (email: string, password: string, display_name: string) =>
     request<User>('POST', '/api/auth/register', { email, password, display_name }),
   logout: () => request<void>('POST', '/api/auth/logout'),
-  updateMe: (input: { display_name?: string; current_password?: string; new_password?: string }) =>
-    request<User>('PATCH', '/api/me', input),
+  updateMe: (input: {
+    display_name?: string
+    current_password?: string
+    new_password?: string
+    default_combine_icebox_backlog?: boolean
+  }) => request<User>('PATCH', '/api/me', input),
   tokens: () => request<ApiToken[]>('GET', '/api/me/tokens'),
   createToken: (name: string, expires_in_days = 0) =>
     request<CreatedToken>('POST', '/api/me/tokens', { name, expires_in_days }),

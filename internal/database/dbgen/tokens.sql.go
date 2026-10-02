@@ -72,7 +72,7 @@ func (q *Queries) DeleteUserAPITokens(ctx context.Context, userID int64) error {
 }
 
 const getAPITokenUser = `-- name: GetAPITokenUser :one
-SELECT api_tokens.id AS token_id, api_tokens.last_used_at, users.id, users.email, users.password_hash, users.display_name, users.is_admin, users.created_at, users.updated_at, users.is_active
+SELECT api_tokens.id AS token_id, api_tokens.last_used_at, users.id, users.email, users.password_hash, users.display_name, users.is_admin, users.created_at, users.updated_at, users.is_active, users.default_combine_icebox_backlog
 FROM api_tokens
 JOIN users ON users.id = api_tokens.user_id
 WHERE api_tokens.token_hash = ?1
@@ -105,6 +105,7 @@ func (q *Queries) GetAPITokenUser(ctx context.Context, arg GetAPITokenUserParams
 		&i.User.CreatedAt,
 		&i.User.UpdatedAt,
 		&i.User.IsActive,
+		&i.User.DefaultCombineIceboxBacklog,
 	)
 	return i, err
 }
