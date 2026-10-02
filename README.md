@@ -41,12 +41,12 @@ Source: <https://github.com/xuancongwen/trackstar> · MIT licensed.
 
 The first account you register becomes the administrator. The projects page
 lists your projects with what is going on in each (stories in progress,
-stories delivered and waiting to be accepted, when it was last active) and,
-below, the recent activity across them: who started, finished, estimated or
-commented on what. Each project carries a small chart of its last 30 days,
-and the busiest projects come first. Type in the search box (`/` jumps to it)
-to narrow the list; when one project is left, Enter opens it. Create a
-project and you land on the board:
+stories delivered and waiting to be accepted, when it was last active). Each
+project carries a small chart of its last 30 days, and the busiest projects
+come first; the sort control switches to alphabetical order and your browser
+remembers the choice. Type in the search box (`/` jumps to it) to narrow the
+list; when one project is left, Enter opens it. Create a project and you
+land on the board:
 
 - **Icebox** – ideas. **Backlog** – prioritised work. **Current iteration** –
   what is being worked on now. **Done** (toggle) – accepted work by iteration.
@@ -531,7 +531,7 @@ GET    /api/me/grants     DELETE /api/me/grants/:id   (session; apps connected t
 GET    /api/users         PATCH /api/users/:id {display_name, is_admin, is_active}   POST /api/users/:id/password   (admin, session)
 GET    /api/config
 GET    /api/projects      POST /api/projects
-GET    /api/overview      {projects: [{project_id, in_progress, to_accept, last_activity_at}], activity: [newest story changes and comments]}   (the projects page)
+GET    /api/overview      {projects: [{project_id, in_progress, to_accept, last_activity_at, activity: [changes per day, last 30 days]}]}   (the projects page)
 GET    /api/projects/:id  PATCH … DELETE …       (:id may be the numeric id or the slug; DELETE removes every story with it)
                           PATCH {name, description, iteration_length_days, iteration_start_weekday, velocity_window, estimate_bugs_and_chores}
 POST   /api/projects/:id/archive     DELETE …    (archive = read-only for everyone; owners and admins)

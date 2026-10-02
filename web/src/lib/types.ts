@@ -165,24 +165,8 @@ export interface ProjectStats {
   activity: number[]
 }
 
-/** One line of the cross-project feed: a story change (an Activity kind) or a comment. */
-export interface FeedEntry {
-  id: number
-  kind: Activity['kind'] | 'comment'
-  project_id: number
-  story_id: number
-  story_title: string
-  user_id: number
-  old_value: string
-  new_value: string
-  /** Comments only. */
-  body?: string
-  created_at: string
-}
-
 export interface Overview {
   projects: ProjectStats[]
-  activity: FeedEntry[]
 }
 
 export interface Comment {

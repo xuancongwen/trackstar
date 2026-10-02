@@ -133,10 +133,11 @@ JOIN stories ON stories.id = comments.story_id
 WHERE stories.project_id IN (sqlc.slice(project_ids))
 GROUP BY stories.project_id;
 
--- How much happened in each project on each day since sqlc.arg(since): the
--- same changes the feed shows, counted. "day" is whole days after since, so
--- the caller picks the time zone by picking since. since comes first because
--- of how sqlc numbers what follows a slice (see RecentActivity).
+-- How much happened in each project on each day since sqlc.arg(since).
+-- Renames and type changes are edits, not news. "day" is whole days after
+-- since, so the caller picks the time zone by picking since. since comes
+-- first because sqlc numbers a parameter that follows a slice as if the slice
+-- were one value, so it would read one of the project ids instead.
 -- name: ProjectActivityByDay :many
 SELECT CAST((activity.created_at - sqlc.arg(since)) / 86400 AS INTEGER) AS day,
        stories.project_id, COUNT(*) AS changes
@@ -156,27 +157,3 @@ WHERE stories.project_id IN (sqlc.slice(project_ids))
   AND stories.deleted_at IS NULL
   AND comments.created_at >= sqlc.arg(since)
 GROUP BY stories.project_id, day;
-
--- Newest first across projects. Renames and type changes are edits, not news.
--- The limit (story.FeedSize) is a literal here and in RecentComments: sqlc
--- numbers a parameter that follows a slice as if the slice were one value,
--- so a bound limit would read one of the project ids instead.
--- name: RecentActivity :many
-SELECT activity.id, activity.kind, activity.old_value, activity.new_value, activity.created_at, activity.user_id,
-       stories.id AS story_id, stories.title AS story_title, stories.project_id
-FROM activity
-JOIN stories ON stories.id = activity.story_id
-WHERE stories.project_id IN (sqlc.slice(project_ids))
-  AND activity.kind NOT IN ('title', 'type')
-ORDER BY activity.id DESC
-LIMIT 60;
-
--- name: RecentComments :many
-SELECT comments.id, comments.body, comments.created_at, comments.user_id,
-       stories.id AS story_id, stories.title AS story_title, stories.project_id
-FROM comments
-JOIN stories ON stories.id = comments.story_id
-WHERE stories.project_id IN (sqlc.slice(project_ids))
-  AND stories.deleted_at IS NULL
-ORDER BY comments.id DESC
-LIMIT 60;

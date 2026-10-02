@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
-  import { feedPhrase, foldCreated, withoutEchoes, type FeedLine } from '../lib/activity'
   import { timeAgo } from '../lib/format'
   import type { Project, ProjectStats, User } from '../lib/types'
   import AccountDialog from './AccountDialog.svelte'
@@ -14,10 +13,31 @@
   let showAccount = $state(false)
   let showUsers = $state(false)
 
+  // How the active projects are ordered. A habit of whoever is looking, so it
+  // stays in this browser instead of on the account.
+  type SortBy = 'activity' | 'name'
+  const SORT_KEY = 'trackstar.projects.sort'
+  function storedSort(): SortBy {
+    try {
+      return localStorage.getItem(SORT_KEY) === 'name' ? 'name' : 'activity'
+    } catch {
+      return 'activity'
+    }
+  }
+  let sortBy = $state<SortBy>(storedSort())
+  function onSortChange() {
+    try {
+      localStorage.setItem(SORT_KEY, sortBy)
+    } catch {
+      // Private browsing: the choice lasts until the page is left.
+    }
+  }
+
   let projects = $state<Project[]>([])
-  // Busiest first: the server lists projects by name, and the sort is stable,
-  // so equally busy (or equally quiet) projects stay in name order.
-  let active = $derived(projects.filter((p) => !p.archived_at).sort((a, b) => recentChanges(b) - recentChanges(a)))
+  let byName = $derived(projects.filter((p) => !p.archived_at).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })))
+  // Busiest first: the sort is stable, so equally busy (or equally quiet)
+  // projects stay in name order.
+  let active = $derived(sortBy === 'name' ? byName : [...byName].sort((a, b) => recentChanges(b) - recentChanges(a)))
   let archived = $derived(projects.filter((p) => p.archived_at))
 
   // Typing narrows both lists by name; Enter opens the only project left.
@@ -31,23 +51,17 @@
   let name = $state('')
   let error = $state('')
 
-  // The overview: what is going on in each project and what happened lately.
-  // It is decoration on the list, so the page works without it.
+  // The overview: what is going on in each project. It is decoration on the
+  // list, so the page works without it.
   let stats = $state(new Map<number, ProjectStats>())
-  const FEED_LINES = 20
-  let feed = $state<FeedLine[]>([])
   let userList = $state<User[]>([])
-  let users = $derived(new Map(userList.map((u) => [u.id, u])))
-  let projectsById = $derived(new Map(projects.map((p) => [p.id, p])))
   const recentChanges = (p: Project) => (stats.get(p.id)?.activity ?? []).reduce((a, b) => a + b, 0)
-  const userName = (id: string | number) => users.get(Number(id))?.display_name ?? 'Someone'
 
   onMount(async () => {
     const overview = Promise.all([api.overview(), api.users()])
       .then(([o, us]) => {
         stats = new Map(o.projects.map((s) => [s.project_id, s]))
         userList = us
-        feed = foldCreated(withoutEchoes(o.activity)).slice(0, FEED_LINES)
       })
       .catch(() => {})
     try {
@@ -70,8 +84,6 @@
     return parts.join(' · ')
   }
 
-  const excerpt = (body: string) => (body.length > 140 ? body.slice(0, 140).trimEnd() + '…' : body)
-
   async function create(event: SubmitEvent) {
     event.preventDefault()
     error = ''
@@ -83,7 +95,7 @@
     }
   }
 
-  /** The feed names people, so a changed display name has to reach it too. */
+  /** The users dialog lists people, so a changed display name has to reach it too. */
   function accountSaved(u: User) {
     onuserchanged(u)
     userList = userList.map((x) => (x.id === u.id ? u : x))
@@ -141,6 +153,12 @@
 <main>
   <div class="head">
     <h1>Projects</h1>
+    {#if active.length > 1}
+      <select bind:value={sortBy} onchange={onSortChange} aria-label="Sort projects">
+        <option value="activity">Most active first</option>
+        <option value="name">By name</option>
+      </select>
+    {/if}
     {#if projects.length > 0}
       <input
         class="search"
@@ -195,33 +213,6 @@
     <button class="primary">Create project</button>
   </form>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
-
-  {#if feed.length > 0}
-    <section aria-label="Recent activity">
-      <h2>Recent activity</h2>
-      <ol class="feed">
-        {#each feed as e (e.kind === 'comment' ? `c${e.id}` : `a${e.id}`)}
-          {@const project = projectsById.get(e.project_id)}
-          {@const phrase = feedPhrase(e, userName)}
-          <li>
-            <a href={project ? `#/p/${project.slug}` : '#/'}>
-              <span class="what">
-                <strong>{userName(e.user_id)}</strong>
-                {#if e.stories > 1}
-                  created <span class="story">{e.stories} stories</span>
-                {:else}
-                  {phrase.verb}
-                  <span class="story">{e.story_title}</span>{phrase.suffix}
-                {/if}
-              </span>
-              {#if e.kind === 'comment' && e.body}<span class="quote muted">{excerpt(e.body)}</span>{/if}
-              <span class="muted where">{project?.name ?? 'Project'} · {timeAgo(e.created_at)}</span>
-            </a>
-          </li>
-        {/each}
-      </ol>
-    </section>
-  {/if}
 </main>
 
 {#if showAccount}
@@ -301,22 +292,15 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
-    gap: 4px 12px;
+    gap: 4px 8px;
   }
   h1 {
+    flex: 1;
     font-size: 18px;
   }
   .search {
     flex: 0 1 220px;
     min-width: 0;
-  }
-  h2 {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--muted);
-    margin: 28px 0 6px;
   }
   ul {
     list-style: none;
@@ -339,52 +323,18 @@
   li a:hover {
     background: var(--row-hover);
   }
-  li a strong,
-  .story,
-  .quote {
-    overflow-wrap: anywhere;
-  }
   li a strong {
     flex: 1;
+    overflow-wrap: anywhere;
   }
   .summary {
     flex: none;
     text-align: right;
     font-size: 12px;
   }
-  .feed {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    gap: 0;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    overflow: hidden;
-  }
-  .feed li + li {
-    border-top: 1px solid var(--border);
-  }
-  .feed a {
-    display: grid;
-    gap: 2px;
-    padding: 8px 12px;
-    border: 0;
-    border-radius: 0;
-  }
-  .story {
-    font-weight: 600;
-  }
-  .quote {
-    border-left: 2px solid var(--border);
-    padding-left: 8px;
-  }
-  .where {
-    font-size: 12px;
-  }
   /* A phone has no room for the name and the summary side by side. */
   @media (max-width: 480px) {
-    ul li a {
+    li a {
       flex-direction: column;
       align-items: flex-start;
       gap: 2px;

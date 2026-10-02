@@ -103,10 +103,11 @@ type Querier interface {
 	ListTasks(ctx context.Context, storyID int64) ([]Task, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	MaxTaskPosition(ctx context.Context, storyID int64) (interface{}, error)
-	// How much happened in each project on each day since sqlc.arg(since): the
-	// same changes the feed shows, counted. "day" is whole days after since, so
-	// the caller picks the time zone by picking since. since comes first because
-	// of how sqlc numbers what follows a slice (see RecentActivity).
+	// How much happened in each project on each day since sqlc.arg(since).
+	// Renames and type changes are edits, not news. "day" is whole days after
+	// since, so the caller picks the time zone by picking since. since comes
+	// first because sqlc numbers a parameter that follows a slice as if the slice
+	// were one value, so it would read one of the project ids instead.
 	ProjectActivityByDay(ctx context.Context, arg ProjectActivityByDayParams) ([]ProjectActivityByDayRow, error)
 	ProjectCommentsByDay(ctx context.Context, arg ProjectCommentsByDayParams) ([]ProjectCommentsByDayRow, error)
 	// A comment does not touch its story's updated_at.
@@ -116,12 +117,6 @@ type Querier interface {
 	// time only).
 	ProjectStoryStats(ctx context.Context, projectIds []int64) ([]ProjectStoryStatsRow, error)
 	PurgeDeletedStories(ctx context.Context, before sql.NullInt64) (int64, error)
-	// Newest first across projects. Renames and type changes are edits, not news.
-	// The limit (story.FeedSize) is a literal here and in RecentComments: sqlc
-	// numbers a parameter that follows a slice as if the slice were one value,
-	// so a bound limit would read one of the project ids instead.
-	RecentActivity(ctx context.Context, projectIds []int64) ([]RecentActivityRow, error)
-	RecentComments(ctx context.Context, projectIds []int64) ([]RecentCommentsRow, error)
 	// The pattern ('%term%', lower-cased) is built in Go; LOWER() keeps behaviour
 	// identical between SQLite and PostgreSQL. sqlc's SQLite parser has no ESCAPE
 	// support, so % and _ typed by a user simply act as wildcards.
