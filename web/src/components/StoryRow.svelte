@@ -102,7 +102,8 @@
           >
         {/each}
       </span>
-    {:else}
+    {:else if actions.length}
+      <span class="actions">
       {#each actions as action (action.state)}
         <button
           class="action {action.tone}"
@@ -113,16 +114,19 @@
           }}>{action.label}</button
         >
       {/each}
+      </span>
     {/if}
   </div>
 </div>
 
 <style>
+  /* No vertical padding on the row: the action and estimate buttons fill its
+     full height and reach its right edge, so a slightly-off click still hits
+     a button instead of expanding the story. The body carries the padding. */
   .story {
     display: flex;
-    align-items: center;
     gap: 6px;
-    padding: 4px 6px 4px 2px;
+    padding: 0 0 0 2px;
     background: var(--row);
     border-bottom: 1px solid var(--border);
     border-left: 3px solid transparent;
@@ -155,8 +159,8 @@
     }
   }
   @media (max-width: 600px) {
-    .story {
-      padding: 7px 6px 7px 2px;
+    .body {
+      padding: 7px 0;
     }
     .title {
       white-space: normal;
@@ -194,6 +198,7 @@
     box-shadow: none;
   }
   .grip {
+    align-self: center;
     color: var(--muted);
     width: 14px;
     text-align: center;
@@ -202,6 +207,8 @@
   .body {
     flex: 1;
     min-width: 0;
+    align-self: center;
+    padding: 4px 0;
   }
   .title {
     overflow: hidden;
@@ -236,6 +243,31 @@
     align-items: center;
     gap: 5px;
     flex: none;
+    padding-right: 6px;
+  }
+  /* Full-height, edge-to-edge button strips with no gaps between buttons. */
+  .actions,
+  .side .estimates {
+    display: flex;
+    align-self: stretch;
+    gap: 0;
+    margin-right: -6px;
+  }
+  .actions button,
+  .side .estimates button {
+    border: none;
+    border-radius: 0;
+    min-height: 0;
+  }
+  .side .estimates button {
+    padding: 0 6px;
+    min-width: 26px;
+    background: transparent;
+    border-left: 1px solid var(--border);
+  }
+  .side .estimates button:hover:not(:disabled) {
+    background: var(--accent);
+    color: var(--accent-text);
   }
   .points {
     min-width: 20px;
@@ -254,9 +286,12 @@
   .action {
     font-size: 11px;
     font-weight: 600;
-    padding: 1px 8px;
-    border-color: transparent;
+    padding: 0 12px;
+    min-width: 64px;
     color: #fff;
+  }
+  .action + .action {
+    border-left: 1px solid var(--row);
   }
   .action.start {
     background: var(--start);
