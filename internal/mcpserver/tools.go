@@ -63,8 +63,8 @@ func (s *server) addTools(srv *mcp.Server) {
 	tool(srv, &mcp.Tool{Name: "list_users", Description: "List user accounts (id, name, email) so owner_id and requester_id can be resolved to people.", Annotations: readOnly}, s.listUsers)
 	tool(srv, &mcp.Tool{Name: "list_stories", Description: "List a project's stories in board order, optionally one section only or matching a search. Live stories (icebox, backlog, current) come back together unless section is given; section \"done\" returns stories accepted in earlier iterations.", Annotations: readOnly}, s.listStories)
 	tool(srv, &mcp.Tool{Name: "get_story", Description: "Get one story with its comments, tasks and activity history.", Annotations: readOnly}, s.getStory)
-	tool(srv, &mcp.Tool{Name: "create_story", Description: "Create a story in a project. New stories go to the bottom of the icebox unless section is given.", Annotations: additive}, s.createStory)
-	tool(srv, &mcp.Tool{Name: "create_stories", Description: "Create up to 50 stories in one project and section, keeping the order given: the first goes where create_story would put it (top of the icebox, bottom of backlog or current) and each next one right after the previous one created. Use it to file a plan. Items can wait on earlier items of the same call (blocked_by_items). Each item succeeds or fails on its own; the result reports each.", Annotations: additive}, s.createStories)
+	tool(srv, &mcp.Tool{Name: "create_story", Description: "Create a story in a project. " + newStoryPlacement, Annotations: additive}, s.createStory)
+	tool(srv, &mcp.Tool{Name: "create_stories", Description: "Create up to 50 stories in one project and section, keeping the order given: the first goes where create_story would put it, and each next one right after the previous one created. " + newStoryPlacement + " Use it to file a plan. Items can wait on earlier items of the same call (blocked_by_items). Each item succeeds or fails on its own; the result reports each.", Annotations: additive}, s.createStories)
 	tool(srv, &mcp.Tool{Name: "update_story", Description: "Change a story's fields or advance its workflow state. Omitted fields are left alone.", Annotations: updates}, s.updateStory)
 	tool(srv, &mcp.Tool{Name: "update_stories", Description: "Change up to 50 stories in one call, from any projects you can write to. Each item takes update_story's fields; omitted fields are left alone. Each item succeeds or fails on its own; the result reports each.", Annotations: updates}, s.updateStories)
 	tool(srv, &mcp.Tool{Name: "move_story", Description: "Move a story to a section and position: after prev_id, before next_id, or to the top of the section when neither is given.", Annotations: updates}, s.moveStory)
@@ -372,6 +372,10 @@ func (s *server) moveStory(ctx context.Context, _ *mcp.CallToolRequest, in moveS
 	s.publish(res.Story.ProjectID, res.Story.ID)
 	return nil, res, nil
 }
+
+// newStoryPlacement says where story.Service.Create puts a new story;
+// TestNewStoryPlacement holds it to that.
+const newStoryPlacement = "A new story goes to the top of the icebox (the default section), or to the bottom of backlog or current."
 
 // maxBulk is how many items one bulk tool call may carry.
 const maxBulk = 50

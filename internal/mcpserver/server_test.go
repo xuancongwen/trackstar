@@ -393,6 +393,48 @@ func TestMoveStories(t *testing.T) {
 	}
 }
 
+// TestNewStoryPlacement: the tool descriptions say where a new story lands;
+// check that against create_story.
+func TestNewStoryPlacement(t *testing.T) {
+	for _, want := range []string{"top of the icebox", "bottom of backlog or current"} {
+		if !strings.Contains(newStoryPlacement, want) {
+			t.Fatalf("newStoryPlacement = %q, want it to say %q", newStoryPlacement, want)
+		}
+	}
+	f := newFixture(t)
+	ctx := context.Background()
+	f.deps.Projects.Create(ctx, f.admin.ID, project.Input{Name: ptr("Apollo")})
+	cs := f.connect(t, f.admin)
+	for _, sec := range []string{"icebox", "backlog", "current"} {
+		var first, second story.Story
+		args := map[string]any{"project": "apollo", "title": sec + " 1"}
+		if sec != "icebox" {
+			args["section"] = sec
+		}
+		mustCall(t, cs, "create_story", args, &first)
+		args["title"] = sec + " 2"
+		mustCall(t, cs, "create_story", args, &second)
+		var list storiesOut
+		mustCall(t, cs, "list_stories", map[string]any{"project": "apollo", "section": sec}, &list)
+		want := []int64{first.ID, second.ID} // bottom
+		if sec == "icebox" {
+			want = []int64{second.ID, first.ID} // top
+		}
+		if got := ids(list.Stories); !slices.Equal(got, want) {
+			t.Errorf("%s = %v, want %v", sec, got, want)
+		}
+	}
+	res, err := cs.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range res.Tools {
+		if strings.HasPrefix(tool.Name, "create_stor") && !strings.Contains(tool.Description, newStoryPlacement) {
+			t.Errorf("%s description does not state the placement: %q", tool.Name, tool.Description)
+		}
+	}
+}
+
 func TestCreateStories(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
