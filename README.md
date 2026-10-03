@@ -536,14 +536,14 @@ GET    /api/projects/:id  PATCH … DELETE …       (:id may be the numeric id 
                           PATCH {name, description, iteration_length_days, iteration_start_weekday, velocity_window, estimate_bugs_and_chores}
 POST   /api/projects/:id/archive     DELETE …    (archive = read-only for everyone; owners and admins)
 GET    /api/projects/:id/stories[?q=text | ?section=done | ?section=deleted]
-POST   /api/projects/:id/stories     {title, type?, estimate?, section?, description?, owner_id?, labels?}
+POST   /api/projects/:id/stories     {title, type?, estimate?, section?, description?, owner_id?, labels?, blocked_by?}
 GET    /api/projects/:id/labels | /iterations | /velocity
 GET    /api/projects/:id/epics       POST … {name, description}     PATCH /api/epics/:id     DELETE /api/epics/:id (demotes to a label)
 GET    /api/projects/:id/members     PUT /api/projects/:id/members/:user {role: owner|member}      DELETE …   (owners and admins)
 GET    /api/projects/:id/filters     POST … {name, query}           DELETE /api/filters/:id   (per user)
 POST   /api/stories/move             {ids, section, prev_id | next_id}   → {stories}   (ordered bulk move, one transaction)
 POST   /api/stories/:id/tasks {description}     PATCH /api/tasks/:id {description, done, position}     DELETE /api/tasks/:id
-GET    /api/projects/:id/events      text/event-stream; events "stories" and "project", data {project_id, story_id, client}
+GET    /api/projects/:id/events      text/event-stream; events "stories" and "project", data {project_id, story_id | story_ids, client}
 GET    /api/stories/:id              (with comments, activity and tasks)
 PATCH  /api/stories/:id              {title, description, type, state, estimate|null, owner_id|null, requester_id, labels, blocked_by}
 DELETE /api/stories/:id              → the trashed story (soft delete, 30-day retention)
@@ -667,8 +667,10 @@ Tools (a project is named by numeric id or slug):
 | `list_users` | ids → names, so `owner_id` can be resolved; includes `me` |
 | `list_stories` | a project's stories in board order; `section` (icebox, backlog, current, done) and `query` filters |
 | `get_story` | one story with comments, tasks and activity |
-| `create_story` | title, type, estimate, section, owner, labels |
+| `create_story` | title, type, estimate, section, owner, labels, `blocked_by` |
+| `create_stories` | up to 50 stories in one project and section, in the order given; `blocked_by_items` links an item to earlier items of the same call; each item succeeds or fails on its own |
 | `update_story` | any field or the workflow `state`; `clear_owner` / `clear_estimate` to unset |
+| `update_stories` | up to 50 stories, from any of your projects, with `update_story`'s fields per item; each item succeeds or fails on its own |
 | `move_story` | to a section, after `prev_id` or before `next_id`, or to the top |
 | `move_stories` | up to 50 stories of one project to one place, in the order given; each story succeeds or fails on its own and the result reports each |
 | `add_comment` | |

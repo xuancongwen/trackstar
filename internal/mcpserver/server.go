@@ -58,7 +58,9 @@ priority. A move names a neighbour (prev_id or next_id) in the target
 section, or neither to put the story at the top. Started or later stories
 stay in the current section; accepted stories cannot be moved. To order
 several stories, use move_stories: one call places them all, in the order
-given, at one point.
+given, at one point. To file a plan, use create_stories: one call creates
+the stories in order and can link them (blocked_by_items). To change
+several stories (finish a batch, relabel a plan), use update_stories.
 
 Types are feature, bug and chore. Features carry an estimate (points); bugs
 and chores only in projects with estimate_bugs_and_chores enabled.

@@ -64,7 +64,9 @@ func (s *server) addTools(srv *mcp.Server) {
 	tool(srv, &mcp.Tool{Name: "list_stories", Description: "List a project's stories in board order, optionally one section only or matching a search. Live stories (icebox, backlog, current) come back together unless section is given; section \"done\" returns stories accepted in earlier iterations.", Annotations: readOnly}, s.listStories)
 	tool(srv, &mcp.Tool{Name: "get_story", Description: "Get one story with its comments, tasks and activity history.", Annotations: readOnly}, s.getStory)
 	tool(srv, &mcp.Tool{Name: "create_story", Description: "Create a story in a project. New stories go to the bottom of the icebox unless section is given.", Annotations: additive}, s.createStory)
+	tool(srv, &mcp.Tool{Name: "create_stories", Description: "Create up to 50 stories in one project and section, keeping the order given: the first goes where create_story would put it (top of the icebox, bottom of backlog or current) and each next one right after the previous one created. Use it to file a plan. Items can wait on earlier items of the same call (blocked_by_items). Each item succeeds or fails on its own; the result reports each.", Annotations: additive}, s.createStories)
 	tool(srv, &mcp.Tool{Name: "update_story", Description: "Change a story's fields or advance its workflow state. Omitted fields are left alone.", Annotations: updates}, s.updateStory)
+	tool(srv, &mcp.Tool{Name: "update_stories", Description: "Change up to 50 stories in one call, from any projects you can write to. Each item takes update_story's fields; omitted fields are left alone. Each item succeeds or fails on its own; the result reports each.", Annotations: updates}, s.updateStories)
 	tool(srv, &mcp.Tool{Name: "move_story", Description: "Move a story to a section and position: after prev_id, before next_id, or to the top of the section when neither is given.", Annotations: updates}, s.moveStory)
 	tool(srv, &mcp.Tool{Name: "move_stories", Description: "Move up to 50 stories of one project to a section, in the order given: the first goes after prev_id, before next_id, or to the top of the section, and each next one right after the previous one moved. A story that cannot be moved is reported in its result and the others still move.", Annotations: updates}, s.moveStories)
 	tool(srv, &mcp.Tool{Name: "add_comment", Description: "Add a comment to a story.", Annotations: additive}, s.addComment)
@@ -192,6 +194,7 @@ type createStoryIn struct {
 	Section     string   `json:"section,omitempty" jsonschema:"icebox (default), backlog or current"`
 	OwnerID     *int64   `json:"owner_id,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
+	BlockedBy   []int64  `json:"blocked_by,omitempty" jsonschema:"ids of stories this one waits on"`
 }
 
 func (s *server) createStory(ctx context.Context, _ *mcp.CallToolRequest, in createStoryIn) (*mcp.CallToolResult, story.Story, error) {
@@ -202,13 +205,96 @@ func (s *server) createStory(ctx context.Context, _ *mcp.CallToolRequest, in cre
 	u, _ := userFrom(ctx) // resolveProject already required it
 	st, err := s.deps.Stories.Create(ctx, p.ID, u.ID, story.CreateInput{
 		Title: in.Title, Description: in.Description, Type: story.Type(in.Type), Estimate: in.Estimate,
-		Section: story.Section(in.Section), OwnerID: in.OwnerID, Labels: in.Labels,
+		Section: story.Section(in.Section), OwnerID: in.OwnerID, Labels: in.Labels, BlockedBy: in.BlockedBy,
 	})
 	if err != nil {
 		return nil, story.Story{}, s.fail(err)
 	}
 	s.publish(st.ProjectID, st.ID)
+	for _, b := range in.BlockedBy {
+		s.publish(st.ProjectID, b)
+	}
 	return nil, st, nil
+}
+
+// itemBlockers resolves item i's blocked_by_items to the ids created for
+// those earlier items and appends them to its blocked_by.
+func itemBlockers(i int, it createItem, created []int64) ([]int64, error) {
+	ids := slices.Clone(it.BlockedBy)
+	for _, j := range it.BlockedByItems {
+		if j < 0 || j >= i {
+			return nil, apperr.Invalid("blocked_by_items: %d is not an earlier item", j)
+		}
+		if created[j] == 0 {
+			return nil, apperr.Invalid("blocked_by_items: item %d was not created", j)
+		}
+		ids = append(ids, created[j])
+	}
+	return ids, nil
+}
+
+type createItem struct {
+	Title          string   `json:"title"`
+	Description    string   `json:"description,omitempty"`
+	Type           string   `json:"type,omitempty" jsonschema:"feature (default), bug or chore"`
+	Estimate       *int64   `json:"estimate,omitempty" jsonschema:"points; features only, unless the project's estimate_bugs_and_chores is on"`
+	OwnerID        *int64   `json:"owner_id,omitempty"`
+	Labels         []string `json:"labels,omitempty"`
+	BlockedBy      []int64  `json:"blocked_by,omitempty" jsonschema:"ids of existing stories this one waits on"`
+	BlockedByItems []int    `json:"blocked_by_items,omitempty" jsonschema:"0-based indexes of earlier items in this call that this one waits on"`
+}
+
+type createStoriesIn struct {
+	projectRef
+	Section string       `json:"section,omitempty" jsonschema:"icebox (default), backlog or current; the same for every item"`
+	Items   []createItem `json:"items" jsonschema:"the stories, in the order they should end up"`
+}
+
+// createStories creates each item on its own (one transaction per story), so
+// one that fails does not hold back the rest. Links go to earlier items only,
+// which are already created (or known to have failed) when an item's turn
+// comes.
+func (s *server) createStories(ctx context.Context, _ *mcp.CallToolRequest, in createStoriesIn) (*mcp.CallToolResult, bulkOut, error) {
+	if err := checkBulkSize(len(in.Items)); err != nil {
+		return nil, bulkOut{}, err
+	}
+	sec := story.Section(in.Section)
+	if sec == "" {
+		sec = story.SectionIcebox
+	}
+	if sec != story.SectionIcebox && sec != story.SectionBacklog && sec != story.SectionCurrent {
+		return nil, bulkOut{}, apperr.Invalid("section must be icebox, backlog or current")
+	}
+	p, err := s.resolveProject(ctx, string(in.Project), true)
+	if err != nil {
+		return nil, bulkOut{}, s.fail(err)
+	}
+	u, _ := userFrom(ctx) // resolveProject already required it
+	out := bulkOut{Results: make([]itemResult, 0, len(in.Items))}
+	created := make([]int64, len(in.Items)) // 0: not created
+	var ids []int64
+	var after *int64
+	for i, it := range in.Items {
+		blockedBy, err := itemBlockers(i, it, created)
+		if err != nil {
+			out.add(s.itemFailed(0, err))
+			continue
+		}
+		st, err := s.deps.Stories.Create(ctx, p.ID, u.ID, story.CreateInput{
+			Title: it.Title, Description: it.Description, Type: story.Type(it.Type), Estimate: it.Estimate,
+			Section: sec, OwnerID: it.OwnerID, Labels: it.Labels, BlockedBy: blockedBy, After: after,
+		})
+		if err != nil {
+			out.add(s.itemFailed(0, err))
+			continue
+		}
+		out.add(itemDone(st))
+		created[i] = st.ID
+		ids = append(ids, st.ID)
+		after = &created[i]
+	}
+	s.publishMany(p.ID, ids)
+	return nil, out, nil
 }
 
 type updateStoryIn struct {
@@ -226,10 +312,7 @@ type updateStoryIn struct {
 	BlockedBy     *[]int64  `json:"blocked_by,omitempty" jsonschema:"ids of stories this one waits on (replaces the current list)"`
 }
 
-func (s *server) updateStory(ctx context.Context, _ *mcp.CallToolRequest, in updateStoryIn) (*mcp.CallToolResult, story.Story, error) {
-	if _, err := s.storyProject(ctx, in.ID, true); err != nil {
-		return nil, story.Story{}, s.fail(err)
-	}
+func (in updateStoryIn) input() story.UpdateInput {
 	upd := story.UpdateInput{Title: in.Title, Description: in.Description, RequesterID: in.RequesterID, Labels: in.Labels, BlockedBy: in.BlockedBy}
 	if in.Type != nil {
 		upd.Type = ptr(story.Type(*in.Type))
@@ -249,8 +332,15 @@ func (s *server) updateStory(ctx context.Context, _ *mcp.CallToolRequest, in upd
 	case in.OwnerID != nil:
 		upd.OwnerID = story.Some(*in.OwnerID)
 	}
+	return upd
+}
+
+func (s *server) updateStory(ctx context.Context, _ *mcp.CallToolRequest, in updateStoryIn) (*mcp.CallToolResult, story.Story, error) {
+	if _, err := s.storyProject(ctx, in.ID, true); err != nil {
+		return nil, story.Story{}, s.fail(err)
+	}
 	u, _ := userFrom(ctx) // storyProject already required it
-	st, err := s.deps.Stories.Update(ctx, in.ID, story.Actor{ID: u.ID, IsAdmin: u.IsAdmin}, upd)
+	st, err := s.deps.Stories.Update(ctx, in.ID, story.Actor{ID: u.ID, IsAdmin: u.IsAdmin}, in.input())
 	if err != nil {
 		return nil, story.Story{}, s.fail(err)
 	}
@@ -325,6 +415,62 @@ func checkBulkSize(n int) error {
 		return apperr.Invalid("give between 1 and %d items", maxBulk)
 	}
 	return nil
+}
+
+type updateStoriesIn struct {
+	Items []updateStoryIn `json:"items" jsonschema:"one entry per story, with update_story's fields"`
+}
+
+// updateStories applies each item on its own (one transaction per story), so
+// one that fails does not hold back the rest. Stories may come from several
+// projects; each project gets one event naming its changed stories and their
+// new blockers.
+func (s *server) updateStories(ctx context.Context, _ *mcp.CallToolRequest, in updateStoriesIn) (*mcp.CallToolResult, bulkOut, error) {
+	if err := checkBulkSize(len(in.Items)); err != nil {
+		return nil, bulkOut{}, err
+	}
+	u, err := userFrom(ctx)
+	if err != nil {
+		return nil, bulkOut{}, err
+	}
+	out := bulkOut{Results: make([]itemResult, 0, len(in.Items))}
+	var projects []int64
+	changed := map[int64][]int64{}
+	for _, it := range in.Items {
+		if _, err := s.storyProject(ctx, it.ID, true); err != nil {
+			out.add(s.itemFailed(it.ID, err))
+			continue
+		}
+		st, err := s.deps.Stories.Update(ctx, it.ID, story.Actor{ID: u.ID, IsAdmin: u.IsAdmin}, it.input())
+		if err != nil {
+			out.add(s.itemFailed(it.ID, err))
+			continue
+		}
+		out.add(itemDone(st))
+		if changed[st.ProjectID] == nil {
+			projects = append(projects, st.ProjectID)
+		}
+		changed[st.ProjectID] = append(changed[st.ProjectID], st.ID)
+		if it.BlockedBy != nil {
+			changed[st.ProjectID] = append(changed[st.ProjectID], *it.BlockedBy...)
+		}
+	}
+	for _, pid := range projects {
+		s.publishMany(pid, uniq(changed[pid]))
+	}
+	return nil, out, nil
+}
+
+// uniq drops repeated ids, keeping the first occurrence.
+func uniq(ids []int64) []int64 {
+	seen := map[int64]bool{}
+	return slices.DeleteFunc(ids, func(id int64) bool {
+		if seen[id] {
+			return true
+		}
+		seen[id] = true
+		return false
+	})
 }
 
 type moveStoriesIn struct {

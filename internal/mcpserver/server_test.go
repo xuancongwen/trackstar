@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"slices"
@@ -121,7 +122,7 @@ func TestToolsAreListedWithSchemas(t *testing.T) {
 			t.Errorf("%s has no input schema", tool.Name)
 		}
 	}
-	want := []string{"add_comment", "create_story", "get_story", "list_epics", "list_projects", "list_stories", "list_users", "move_stories", "move_story", "update_story", "velocity"}
+	want := []string{"add_comment", "create_stories", "create_story", "get_story", "list_epics", "list_projects", "list_stories", "list_users", "move_stories", "move_story", "update_stories", "update_story", "velocity"}
 	got := strings.Join(sorted(names), ",")
 	if got != strings.Join(want, ",") {
 		t.Fatalf("tools = %s", got)
@@ -389,6 +390,228 @@ func TestMoveStories(t *testing.T) {
 	// Kim is not a member: every story reads as not found, nothing moves.
 	if err := call(t, f.connect(t, f.kim), "move_stories", map[string]any{"ids": []int64{a.ID}, "section": "backlog"}, &out); err != "" || out.Failed != 1 || !strings.Contains(out.Results[0].Error, "not found") {
 		t.Fatalf("non-member: %q %+v", err, out)
+	}
+}
+
+func TestCreateStories(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	p, _ := f.deps.Projects.Create(ctx, f.admin.ID, project.Input{Name: ptr("Apollo")}) // kim is not a member
+	existing, _ := f.deps.Stories.Create(ctx, p.ID, f.admin.ID, story.CreateInput{Title: "Existing idea"})
+	evs, unsubscribe := f.deps.Events.Subscribe(p.ID)
+	defer unsubscribe()
+	cs := f.connect(t, f.admin)
+
+	// A plan in the icebox: it lands on top in the order given. Item 2 fails
+	// validation, so item 4, which waits on it, fails too; item 5 points
+	// forward. The rest are created and linked.
+	var out bulkOut
+	mustCall(t, cs, "create_stories", map[string]any{"project": "apollo", "items": []map[string]any{
+		{"title": "Design", "estimate": 1, "labels": []string{"plan"}},
+		{"title": "Build", "estimate": 3, "blocked_by_items": []int{0}, "blocked_by": []int64{existing.ID}},
+		{"title": ""},
+		{"title": "Fix it", "type": "bug", "blocked_by_items": []int{0, 1}},
+		{"title": "Ship", "blocked_by_items": []int{2}},
+		{"title": "Ahead", "blocked_by_items": []int{6}},
+	}}, &out)
+	if out.Succeeded != 3 || out.Failed != 3 || len(out.Results) != 6 {
+		t.Fatalf("out = %+v", out)
+	}
+	for i, wantErr := range []string{"", "", "title", "", "item 2 was not created", "not an earlier item"} {
+		r := out.Results[i]
+		if wantErr == "" {
+			if !r.OK || r.ID == 0 || r.Section != story.SectionIcebox || r.Title == "" {
+				t.Errorf("result %d = %+v", i, r)
+			}
+		} else if r.OK || r.ID != 0 || !strings.Contains(r.Error, wantErr) {
+			t.Errorf("result %d = %+v, want error containing %q", i, r, wantErr)
+		}
+	}
+	design, build, fix := out.Results[0].ID, out.Results[1].ID, out.Results[3].ID
+	var list storiesOut
+	mustCall(t, cs, "list_stories", map[string]any{"project": "apollo", "section": "icebox"}, &list)
+	if got, want := ids(list.Stories), []int64{design, build, fix, existing.ID}; !slices.Equal(got, want) {
+		t.Fatalf("icebox = %v, want %v", got, want)
+	}
+	var d story.Detail
+	mustCall(t, cs, "get_story", map[string]any{"id": build}, &d)
+	if !slices.Equal(d.BlockedBy, []int64{existing.ID, design}) || d.RequesterID != f.admin.ID || len(d.Activity) == 0 {
+		t.Fatalf("build = %+v", d.Story)
+	}
+	mustCall(t, cs, "get_story", map[string]any{"id": fix}, &d)
+	if !slices.Equal(d.BlockedBy, []int64{design, build}) || d.Type != story.TypeBug {
+		t.Fatalf("fix = %+v", d.Story)
+	}
+	select {
+	case ev := <-evs:
+		if ev.Client != clientID || !slices.Equal(ev.StoryIDs, []int64{design, build, fix}) {
+			t.Fatalf("event = %+v", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no change event published")
+	}
+	select {
+	case ev := <-evs:
+		t.Fatalf("second event %+v", ev)
+	default:
+	}
+
+	// Backlog and current: after what is there, in the order given.
+	for _, sec := range []string{"backlog", "current"} {
+		mustCall(t, cs, "create_stories", map[string]any{"project": p.ID, "section": sec, "items": []map[string]any{{"title": sec + " 1"}, {"title": sec + " 2"}}}, nil)
+		mustCall(t, cs, "create_stories", map[string]any{"project": p.ID, "section": sec, "items": []map[string]any{{"title": sec + " 3"}, {"title": sec + " 4"}}}, nil)
+		mustCall(t, cs, "list_stories", map[string]any{"project": "apollo", "section": sec}, &list)
+		var titles []string
+		for _, st := range list.Stories {
+			titles = append(titles, st.Title)
+		}
+		if got, want := strings.Join(titles, ","), fmt.Sprintf("%[1]s 1,%[1]s 2,%[1]s 3,%[1]s 4", sec); got != want {
+			t.Errorf("%s = %s, want %s", sec, got, want)
+		}
+	}
+
+	// create_story takes blocked_by too.
+	var single story.Story
+	mustCall(t, cs, "create_story", map[string]any{"project": "apollo", "title": "Follow-up", "blocked_by": []int64{design}}, &single)
+	if !slices.Equal(single.BlockedBy, []int64{design}) {
+		t.Fatalf("single = %+v", single)
+	}
+
+	// Whole-call errors create nothing.
+	mustCall(t, cs, "list_stories", map[string]any{"project": "apollo"}, &list)
+	before := len(list.Stories)
+	one := []map[string]any{{"title": "x"}}
+	if msg := call(t, cs, "create_stories", map[string]any{"project": "apollo", "items": []map[string]any{}}, nil); !strings.Contains(msg, "between 1 and 50") {
+		t.Fatalf("no items: %q", msg)
+	}
+	tooMany := make([]map[string]any, 51)
+	for i := range tooMany {
+		tooMany[i] = map[string]any{"title": "x"}
+	}
+	if msg := call(t, cs, "create_stories", map[string]any{"project": "apollo", "items": tooMany}, nil); !strings.Contains(msg, "between 1 and 50") {
+		t.Fatalf("51 items: %q", msg)
+	}
+	if msg := call(t, cs, "create_stories", map[string]any{"project": "apollo", "section": "done", "items": one}, nil); !strings.Contains(msg, "section") {
+		t.Fatalf("bad section: %q", msg)
+	}
+	if msg := call(t, f.connect(t, f.kim), "create_stories", map[string]any{"project": "apollo", "items": one}, nil); !strings.Contains(msg, "not found") {
+		t.Fatalf("non-member: %q", msg)
+	}
+	if _, err := f.deps.Projects.SetArchived(ctx, p.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if msg := call(t, cs, "create_stories", map[string]any{"project": "apollo", "items": one}, nil); !strings.Contains(msg, "archived") {
+		t.Fatalf("archived: %q", msg)
+	}
+	mustCall(t, cs, "list_stories", map[string]any{"project": "apollo"}, &list)
+	if len(list.Stories) != before {
+		t.Fatalf("refused calls created stories: %d, want %d", len(list.Stories), before)
+	}
+}
+
+func TestUpdateStories(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	p, _ := f.deps.Projects.Create(ctx, f.admin.ID, project.Input{Name: ptr("Apollo")}) // kim is not a member
+	q, _ := f.deps.Projects.Create(ctx, f.admin.ID, project.Input{Name: ptr("Gemini")})
+	mk := func(projectID int64, title string) story.Story {
+		t.Helper()
+		st, err := f.deps.Stories.Create(ctx, projectID, f.admin.ID, story.CreateInput{Title: title, Section: story.SectionBacklog})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	a, b, c := mk(p.ID, "A"), mk(p.ID, "B"), mk(p.ID, "C")
+	g := mk(q.ID, "G")
+	trashed := mk(p.ID, "Trashed")
+	if _, err := f.deps.Stories.Delete(ctx, trashed.ID, f.admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	evP, unsubP := f.deps.Events.Subscribe(p.ID)
+	defer unsubP()
+	evQ, unsubQ := f.deps.Events.Subscribe(q.ID)
+	defer unsubQ()
+	cs := f.connect(t, f.admin)
+
+	// a waits on c, which is updated later in the same call; items from two
+	// projects; the refused ones leave the rest alone.
+	var out bulkOut
+	mustCall(t, cs, "update_stories", map[string]any{"items": []map[string]any{
+		{"id": a.ID, "estimate": 2, "labels": []string{"plan"}, "blocked_by": []int64{c.ID}},
+		{"id": trashed.ID, "title": "no"},
+		{"id": b.ID, "estimate": 4},
+		{"id": g.ID, "title": "G renamed", "owner_id": f.kim.ID},
+		{"id": 999, "title": "no"},
+		{"id": c.ID, "type": "chore", "state": "started"},
+	}}, &out)
+	if out.Succeeded != 3 || out.Failed != 3 {
+		t.Fatalf("out = %+v", out)
+	}
+	for i, wantErr := range []string{"", "trash", "estimate", "", "not found", ""} {
+		r := out.Results[i]
+		if wantErr == "" {
+			if !r.OK || r.Title == "" || r.State == "" {
+				t.Errorf("result %d = %+v", i, r)
+			}
+		} else if r.OK || !strings.Contains(r.Error, wantErr) {
+			t.Errorf("result %d = %+v, want error containing %q", i, r, wantErr)
+		}
+	}
+	if r := out.Results[5]; r.ID != c.ID || r.State != story.StateStarted || r.Section != story.SectionCurrent {
+		t.Fatalf("c = %+v", r)
+	}
+	var d story.Detail
+	mustCall(t, cs, "get_story", map[string]any{"id": a.ID}, &d)
+	if *d.Estimate != 2 || !slices.Equal(d.Labels, []string{"plan"}) || !slices.Equal(d.BlockedBy, []int64{c.ID}) {
+		t.Fatalf("a = %+v", d.Story)
+	}
+	mustCall(t, cs, "get_story", map[string]any{"id": b.ID}, &d)
+	if d.Estimate != nil {
+		t.Fatalf("refused item b changed: %+v", d.Story)
+	}
+	mustCall(t, cs, "get_story", map[string]any{"id": g.ID}, &d)
+	if d.Title != "G renamed" || *d.OwnerID != f.kim.ID {
+		t.Fatalf("g = %+v", d.Story)
+	}
+
+	// One event per project, naming the changed stories and new blockers.
+	for _, tc := range []struct {
+		ch   <-chan events.Event
+		want []int64
+	}{{evP, []int64{a.ID, c.ID}}, {evQ, []int64{g.ID}}} {
+		select {
+		case ev := <-tc.ch:
+			if ev.Client != clientID || !slices.Equal(ev.StoryIDs, tc.want) {
+				t.Fatalf("event = %+v, want ids %v", ev, tc.want)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no change event published")
+		}
+		select {
+		case ev := <-tc.ch:
+			t.Fatalf("second event %+v", ev)
+		default:
+		}
+	}
+
+	// Whole-call errors and access.
+	if msg := call(t, cs, "update_stories", map[string]any{"items": []map[string]any{}}, nil); !strings.Contains(msg, "between 1 and 50") {
+		t.Fatalf("no items: %q", msg)
+	}
+	tooMany := make([]map[string]any, 51)
+	for i := range tooMany {
+		tooMany[i] = map[string]any{"id": b.ID, "title": "x"}
+	}
+	if msg := call(t, cs, "update_stories", map[string]any{"items": tooMany}, nil); !strings.Contains(msg, "between 1 and 50") {
+		t.Fatalf("51 items: %q", msg)
+	}
+	mustCall(t, cs, "get_story", map[string]any{"id": b.ID}, &d)
+	if d.Title != "B" {
+		t.Fatalf("refused call changed b: %+v", d.Story)
+	}
+	if msg := call(t, f.connect(t, f.kim), "update_stories", map[string]any{"items": []map[string]any{{"id": b.ID, "title": "x"}}}, &out); msg != "" || out.Failed != 1 || !strings.Contains(out.Results[0].Error, "not found") {
+		t.Fatalf("non-member: %q %+v", msg, out)
 	}
 }
 
