@@ -4,9 +4,10 @@
 
 This project is managed in Trackstar itself: the project with slug `trackstar`,
 reached through the `trackstar` MCP server (`list_stories`, `create_story`,
-`update_story`, `move_story`, `add_comment`, …). The tracker is the single
-record of what is planned and what was done. Keep it current as you go, not
-in one pass at the end.
+`update_story`, `move_story`, `add_comment`, …, and the bulk tools
+`create_stories`, `update_stories` and `move_stories`). The tracker is the
+single record of what is planned and what was done. Keep it current as you
+go, not in one pass at the end.
 
 **Anything planned becomes stories, not documents.** Do not add plan,
 roadmap or TODO files to the repository, and do not write "future work"
@@ -20,8 +21,13 @@ sections into the README. The README describes what exists today.
   open questions for the user in the first story of the plan.
 - Give every story of a plan the same label (`organizations`, `postgres`,
   `mcp-oauth`), and set `blocked_by` where one story needs another.
-- Plans go to the icebox. A new story lands at the top of its section, so
-  move the stories into the order they should be done in.
+- Plans go to the icebox. File a whole plan with one `create_stories` call:
+  list the stories in the order they should be done in, and link them with
+  `blocked_by_items` (indexes of earlier items). It keeps that order, so no
+  moves or `blocked_by` updates are needed afterwards. Check the result:
+  each item succeeds or fails on its own.
+- To change or reorder several stories at once, use `update_stories` or
+  `move_stories` rather than one call per story.
 - Features get an estimate in points (1, 2, 3, 5). Bugs and chores do not.
 
 **Anything done has a story.** If you are about to change the repository and
