@@ -347,7 +347,7 @@ func TestMoveStories(t *testing.T) {
 	// One event for the whole call, naming the stories that moved.
 	select {
 	case ev := <-evs:
-		if ev.Client != clientID || !slices.Equal(ev.StoryIDs, []int64{c.ID, a.ID, b.ID}) {
+		if ev.Client != clientID || !slices.Equal(eventIDs(ev), []int64{c.ID, a.ID, b.ID}) {
 			t.Fatalf("event = %+v", ev)
 		}
 	case <-time.After(time.Second):
@@ -486,7 +486,7 @@ func TestCreateStories(t *testing.T) {
 	}
 	select {
 	case ev := <-evs:
-		if ev.Client != clientID || !slices.Equal(ev.StoryIDs, []int64{design, build, fix}) {
+		if ev.Client != clientID || !slices.Equal(eventIDs(ev), []int64{design, build, fix}) {
 			t.Fatalf("event = %+v", ev)
 		}
 	case <-time.After(time.Second):
@@ -624,7 +624,7 @@ func TestUpdateStories(t *testing.T) {
 	}{{evP, []int64{a.ID, c.ID}}, {evQ, []int64{g.ID}}} {
 		select {
 		case ev := <-tc.ch:
-			if ev.Client != clientID || !slices.Equal(ev.StoryIDs, tc.want) {
+			if ev.Client != clientID || !slices.Equal(eventIDs(ev), tc.want) {
 				t.Fatalf("event = %+v, want ids %v", ev, tc.want)
 			}
 		case <-time.After(time.Second):
@@ -713,6 +713,14 @@ func TestMembershipIsEnforced(t *testing.T) {
 	if d.Title != "edited by kim" {
 		t.Fatalf("member update: %+v", d)
 	}
+}
+
+// eventIDs reads the stories an event names, from story_id or story_ids.
+func eventIDs(ev events.Event) []int64 {
+	if ev.StoryID != 0 {
+		return []int64{ev.StoryID}
+	}
+	return ev.StoryIDs
 }
 
 func ids(stories []story.Story) []int64 {

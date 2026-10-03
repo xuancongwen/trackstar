@@ -2,10 +2,14 @@ package api
 
 import (
 	"bufio"
+	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"trackstar/internal/story"
 )
 
 // stream opens the SSE endpoint with c's cookies and returns a line reader.
@@ -115,4 +119,48 @@ func TestEventsStreamRequiresAuthAndProject(t *testing.T) {
 	c := newClient(t, ts)
 	c.register("sam@example.com")
 	c.must(http.StatusNotFound, "GET", "/api/projects/nope/events", nil, nil)
+}
+
+// TestBulkChangesAreOneEvent: a subscriber buffers only a few events, so a
+// change to many stories must arrive as one event rather than overflow it
+// and get the board disconnected.
+func TestBulkChangesAreOneEvent(t *testing.T) {
+	srv, ts := newServer(t, true)
+	c := newClient(t, ts)
+	c.register("sam@example.com")
+	c.must(http.StatusCreated, "POST", "/api/projects", map[string]any{"name": "Apollo"}, nil)
+	var ids []int64
+	for i := range 50 {
+		var st story.Story
+		c.must(http.StatusCreated, "POST", "/api/projects/1/stories", map[string]any{"title": fmt.Sprintf("S%d", i), "type": "chore"}, &st)
+		ids = append(ids, st.ID)
+	}
+	evs, cancel := srv.Events.Subscribe(1)
+	defer cancel()
+	expect := func(what string, want []int64) {
+		t.Helper()
+		select {
+		case ev, ok := <-evs:
+			if !ok {
+				t.Fatalf("%s: subscriber was dropped", what)
+			}
+			if !slices.Equal(ev.StoryIDs, want) || ev.StoryID != 0 {
+				t.Fatalf("%s: event = %+v, want story_ids %v", what, ev, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%s: no event", what)
+		}
+		select {
+		case ev := <-evs:
+			t.Fatalf("%s: second event %+v", what, ev)
+		default:
+		}
+	}
+
+	c.must(http.StatusOK, "POST", "/api/stories/move", map[string]any{"ids": ids, "section": "backlog"}, nil)
+	expect("bulk move", ids)
+
+	blockers := ids[1:21]
+	c.must(http.StatusOK, "PATCH", fmt.Sprintf("/api/stories/%d", ids[0]), map[string]any{"blocked_by": blockers}, nil)
+	expect("20 blockers", append([]int64{ids[0]}, blockers...))
 }

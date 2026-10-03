@@ -91,13 +91,12 @@ func (s *Server) handleUpdateStory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
-	s.publish(r, "stories", st.ProjectID, st.ID)
 	// A blocker change also affects how the blockers' dependants render.
+	changed := []int64{st.ID}
 	if in.BlockedBy != nil {
-		for _, b := range *in.BlockedBy {
-			s.publish(r, "stories", st.ProjectID, b)
-		}
+		changed = append(changed, *in.BlockedBy...)
 	}
+	s.publishStories(r, st.ProjectID, changed)
 }
 
 func (s *Server) handleDeleteStory(w http.ResponseWriter, r *http.Request) {
@@ -179,9 +178,11 @@ func (s *Server) handleMoveStories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"stories": moved})
-	for _, st := range moved {
-		s.publish(r, "stories", st.ProjectID, st.ID)
+	ids := make([]int64, len(moved))
+	for i, st := range moved {
+		ids[i] = st.ID
 	}
+	s.publishStories(r, projectID, ids)
 }
 
 // --- comments --------------------------------------------------------------------------

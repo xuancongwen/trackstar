@@ -23,6 +23,18 @@ type Event struct {
 	Client    string  `json:"client,omitempty"`
 }
 
+// Stories is the event for a change to the given stories of one project:
+// one story travels in StoryID as before, several in StoryIDs.
+func Stories(projectID int64, storyIDs []int64, client string) Event {
+	e := Event{Type: "stories", ProjectID: projectID, Client: client}
+	if len(storyIDs) == 1 {
+		e.StoryID = storyIDs[0]
+	} else {
+		e.StoryIDs = storyIDs
+	}
+	return e
+}
+
 // bufferSize events may queue per subscriber before it is considered stuck.
 const bufferSize = 16
 

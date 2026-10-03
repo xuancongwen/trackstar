@@ -210,10 +210,7 @@ func (s *server) createStory(ctx context.Context, _ *mcp.CallToolRequest, in cre
 	if err != nil {
 		return nil, story.Story{}, s.fail(err)
 	}
-	s.publish(st.ProjectID, st.ID)
-	for _, b := range in.BlockedBy {
-		s.publish(st.ProjectID, b)
-	}
+	s.publishMany(st.ProjectID, append([]int64{st.ID}, in.BlockedBy...))
 	return nil, st, nil
 }
 
@@ -344,12 +341,11 @@ func (s *server) updateStory(ctx context.Context, _ *mcp.CallToolRequest, in upd
 	if err != nil {
 		return nil, story.Story{}, s.fail(err)
 	}
-	s.publish(st.ProjectID, st.ID)
+	changed := []int64{st.ID}
 	if in.BlockedBy != nil {
-		for _, b := range *in.BlockedBy {
-			s.publish(st.ProjectID, b)
-		}
+		changed = append(changed, *in.BlockedBy...)
 	}
+	s.publishMany(st.ProjectID, changed)
 	return nil, st, nil
 }
 

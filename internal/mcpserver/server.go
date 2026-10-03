@@ -191,7 +191,7 @@ func (s *server) publish(projectID, storyID int64) {
 // event, so a bulk tool cannot overflow a board's event buffer.
 func (s *server) publishMany(projectID int64, storyIDs []int64) {
 	if s.deps.Events != nil && len(storyIDs) > 0 {
-		s.deps.Events.Publish(events.Event{Type: "stories", ProjectID: projectID, StoryIDs: storyIDs, Client: clientID})
+		s.deps.Events.Publish(events.Stories(projectID, storyIDs, clientID))
 	}
 }
 

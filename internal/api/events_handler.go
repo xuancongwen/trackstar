@@ -36,6 +36,15 @@ func (s *Server) publish(r *http.Request, typ string, projectID, storyID int64) 
 	s.Events.Publish(events.Event{Type: typ, ProjectID: projectID, StoryID: storyID, Client: clientID(r)})
 }
 
+// publishStories announces a change to several stories of one project as
+// one event, so a burst cannot overflow a subscriber's buffer.
+func (s *Server) publishStories(r *http.Request, projectID int64, storyIDs []int64) {
+	if s.Events == nil || len(storyIDs) == 0 {
+		return
+	}
+	s.Events.Publish(events.Stories(projectID, storyIDs, clientID(r)))
+}
+
 // handleEvents streams project changes as Server-Sent Events. Events carry no
 // payload beyond ids; the client refetches the story list, which is a few KB.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
