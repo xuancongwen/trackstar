@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte'
+  import { untrack, type Snippet } from 'svelte'
   import { formatRange } from '../lib/format'
   import { totalPoints } from '../lib/board'
   import type { Iteration, Story, StoryState, User } from '../lib/types'
@@ -31,6 +31,14 @@
         stories: stories.filter((s) => s.accepted_at !== null && s.accepted_at >= it.start_at && s.accepted_at < it.end_at),
       })),
   )
+
+  // Page far enough back to show the open story (opened from a link).
+  $effect(() => {
+    const accepted = stories.find((s) => s.id === openId)?.accepted_at
+    if (!accepted) return
+    const index = completed.findIndex((it) => accepted >= it.start_at && accepted < it.end_at)
+    if (index >= untrack(() => shown)) shown = index + 1
+  })
 
   const noop = (_story: Story, _value: StoryState | number) => {}
 </script>

@@ -2,6 +2,8 @@
   import { api } from '../lib/api'
   import { ESTIMATES, SECTION_TITLES, canDrop, canEstimate, nextActions } from '../lib/board'
   import { formatDayTime } from '../lib/format'
+  import { storyHref } from '../lib/links'
+  import LinkedText from './LinkedText.svelte'
   import type { Activity, Comment, DropSection, Project, Story, StoryPatch, StoryType, Task, User } from '../lib/types'
 
   interface Props {
@@ -39,6 +41,9 @@
   let tasks = $state<Task[]>([])
   let newTask = $state('')
   let blockerPick = $state('')
+  // The description shows as text, with story references as links, until
+  // clicked to edit.
+  let editingDescription = $state(false)
   let commentBody = $state('')
   let confirmDelete = $state(false)
   let error = $state('')
@@ -61,6 +66,7 @@
   $effect(() => {
     void story.id
     confirmDelete = false
+    editingDescription = false
   })
 
   let trashed = $derived(story.deleted_at != null)
@@ -170,7 +176,15 @@
     else title = story.title
   }
   function saveDescription() {
+    editingDescription = false
     if (description !== story.description) onpatch(story.id, { description })
+  }
+  function editDescription(event: MouseEvent | KeyboardEvent) {
+    if (frozen || (event.target as Element).closest('a')) return
+    if (event instanceof KeyboardEvent && event.key !== 'Enter') return
+    event.preventDefault()
+    event.stopPropagation() // Enter would otherwise collapse the story
+    editingDescription = true
   }
   function saveLabels() {
     const next = labels
@@ -210,7 +224,7 @@
      treating a drag that starts inside it as a row drag. -->
 <section class="editor" aria-label="Story details" data-no-drag>
   <header>
-    <span class="muted">#{story.id} · {trashed ? 'deleted' : story.state}</span>
+    <span class="muted"><a class="id" href={storyHref(story.id)} title="Link to this story">#{story.id}</a> · {trashed ? 'deleted' : story.state}</span>
     <span class="spacer"></span>
     {#if readOnly}
       <span class="muted">read-only</span>
@@ -302,10 +316,35 @@
       </div>
     {/if}
 
-    <label class="field">
+    <div class="field">
       <span>Description</span>
-      <textarea bind:value={description} onblur={saveDescription} rows="7" placeholder="Add a description…" disabled={frozen}></textarea>
-    </label>
+      {#if editingDescription || (!description && !frozen)}
+        <textarea
+          bind:value={description}
+          onfocus={() => (editingDescription = true)}
+          onblur={saveDescription}
+          rows="7"
+          placeholder="Add a description…  ([#123] links a story)"
+          aria-label="Description"
+          {@attach (el) => {
+            if (editingDescription) el.focus()
+          }}
+        ></textarea>
+      {:else}
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <div
+          class="description"
+          class:editable={!frozen}
+          role={frozen ? undefined : 'button'}
+          tabindex={frozen ? undefined : 0}
+          aria-label={frozen ? undefined : 'Edit description'}
+          onclick={editDescription}
+          onkeydown={editDescription}
+        >
+          <LinkedText text={description} {stories} />
+        </div>
+      {/if}
+    </div>
 
     <label class="field">
       <span>Labels</span>
@@ -347,7 +386,7 @@
         {#each story.blocked_by as id (id)}
           {@const b = stories.find((s) => s.id === id)}
           <li class:cleared={b?.state === 'accepted' || !b}>
-            <span>#{id} {blockerTitle(id)}{b?.state === 'accepted' ? ' (accepted)' : ''}</span>
+            <span><a href={storyHref(id)}>#{id}</a> {blockerTitle(id)}{b?.state === 'accepted' ? ' (accepted)' : ''}</span>
             {#if !frozen}<button class="link" onclick={() => removeBlocker(id)} aria-label={`Remove blocker #${id}`}>✕</button>{/if}
           </li>
         {/each}
@@ -374,7 +413,7 @@
                     <button class="link" onclick={() => removeComment(entry.comment)}>delete</button>
                   {/if}
                 </div>
-                <p>{entry.comment.body}</p>
+                <p><LinkedText text={entry.comment.body} {stories} /></p>
               </article>
             </li>
           {:else}
@@ -448,6 +487,20 @@
     display: grid;
     gap: 10px;
     align-content: start;
+  }
+  header a.id {
+    color: inherit;
+  }
+  .description {
+    min-height: 2.5em;
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .description.editable {
+    cursor: text;
   }
   .title {
     font-size: 15px;

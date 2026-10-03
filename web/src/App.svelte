@@ -11,11 +11,38 @@
   let user = $state<User | null>(null)
   let booting = $state(true)
   let bootError = $state('')
-  let hash = $state(location.hash)
+  let slug = $state<string | null>(null)
+  let linkError = $state('')
 
-  // Routes: #/ (projects) and #/p/<slug> (board). Hash routing needs no
-  // server cooperation and keeps the app dependency-free.
-  let slug = $derived(hash.match(/^#\/p\/([^/]+)/)?.[1] ?? null)
+  // Routes: #/ (projects), #/p/<slug> (board) and #/p/<slug>/s/<id> (board
+  // with a story open, handled by the board). Hash routing needs no server
+  // cooperation and keeps the app dependency-free.
+  //
+  // #/s/<id> links a story without naming its project, which is what story
+  // references in text use; it is looked up and replaced by the board route.
+  // The current board stays up meanwhile, so a link within the project does
+  // not reload it.
+  function route() {
+    linkError = ''
+    const storyId = location.hash.match(/^#\/s\/(\d+)$/)?.[1]
+    if (storyId) resolveStoryLink(Number(storyId))
+    else slug = location.hash.match(/^#\/p\/([^/]+)/)?.[1] ?? null
+  }
+  async function resolveStoryLink(id: number) {
+    try {
+      const story = await api.story(id)
+      const project = await api.project(story.project_id)
+      location.replace(`#/p/${project.slug}/s/${id}`)
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) user = null
+      else linkError = `Story #${id} is not available`
+    }
+  }
+  // Routing needs a session, to look up story links.
+  let signedIn = $derived(user !== null)
+  $effect(() => {
+    if (signedIn) route()
+  })
 
   // The one path route: an MCP client sends the browser to /oauth/authorize
   // to ask for access. Signing in first keeps the URL, so the request
@@ -23,7 +50,9 @@
   const authorizing = location.pathname === '/oauth/authorize'
 
   onMount(() => {
-    const onHash = () => (hash = location.hash)
+    const onHash = () => {
+      if (user) route()
+    }
     window.addEventListener('hashchange', onHash)
     api
       .config()
@@ -46,6 +75,10 @@
   }
 </script>
 
+{#if linkError}
+  <p class="link-error error" role="alert">{linkError} <button class="link" onclick={() => (linkError = '')}>dismiss</button></p>
+{/if}
+
 {#if booting}
   <p class="boot muted">Loading…</p>
 {:else if bootError}
@@ -63,6 +96,18 @@
 {/if}
 
 <style>
+  .link-error {
+    position: fixed;
+    z-index: 100;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    margin: 0;
+    padding: 6px 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
   .boot {
     padding: 40px;
     text-align: center;

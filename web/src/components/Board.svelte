@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { api, ApiError } from '../lib/api'
   import {
     acceptedThisIteration,
@@ -226,6 +226,8 @@
         document.title = `${project.name} · Trackstar`
         userList = await api.users()
         await refresh()
+        await openLinkedStory()
+        linkReady = true
         ;[savedFilters, members] = await Promise.all([api.filters(project.id), api.members(project.id)])
         live = connectLive({ projectId: project.id, onChange: refreshWhenIdle, onStatus: (st) => (liveStatus = st) })
       } catch (err) {
@@ -235,18 +237,65 @@
     })()
 
     // Refresh when the tab regains focus (its stream may have been throttled), plus a slow poll.
-    const tick = () => {
+    const onVisible = () => {
       if (document.visibilityState === 'visible') refreshWhenIdle()
     }
-    const timer = setInterval(tick, REFRESH_MS)
-    document.addEventListener('visibilitychange', tick)
+    const timer = setInterval(onVisible, REFRESH_MS)
+    document.addEventListener('visibilitychange', onVisible)
+    const onHash = () => {
+      if (linkReady) openLinkedStory()
+    }
+    window.addEventListener('hashchange', onHash)
     return () => {
       live?.close()
+      window.removeEventListener('hashchange', onHash)
       mq.removeEventListener('change', onMq)
       clearInterval(timer)
-      document.removeEventListener('visibilitychange', tick)
+      document.removeEventListener('visibilitychange', onVisible)
       document.title = 'Trackstar'
     }
+  })
+
+  // --- story links ------------------------------------------------------------
+
+  // Set once the story named in the URL at load has been opened; until then
+  // the URL must not be rewritten.
+  let linkReady = false
+
+  // Opens the story named by a #/p/<slug>/s/<id> URL, bringing up the panel
+  // it lives in and clearing a filter that hides it.
+  async function openLinkedStory() {
+    const id = Number(location.hash.match(/^#\/p\/[^/]+\/s\/(\d+)/)?.[1])
+    if (!id || !project) return
+    let story = stories.find((s) => s.id === id)
+    try {
+      if (!story) {
+        story = await api.story(id)
+        if (story.project_id !== project.id) return
+        if (story.deleted_at) await (mobile ? selectTab('trash') : showTrash || toggleTrash())
+        else if (story.section === 'done') await (mobile ? selectTab('done') : showDone || toggleDone())
+      }
+    } catch (err) {
+      return fail(err)
+    }
+    if (!story.deleted_at && story.section !== 'done') {
+      if (!visible(story)) {
+        query = ''
+        activeEpic = null
+      }
+      if (mobile) mobileTab = combineIcebox && story.section === 'icebox' ? 'backlog' : story.section
+    }
+    selectedId = openId = id
+    await tick()
+    document.querySelector(`[data-story-id="${id}"]`)?.scrollIntoView({ block: 'start' })
+  }
+
+  // The URL names the open story, so the address bar can be copied as a link.
+  $effect(() => {
+    const id = openId
+    if (!project || !linkReady) return
+    const url = `#/p/${project.slug}` + (id === null ? '' : `/s/${id}`)
+    if (location.hash !== url) history.replaceState(history.state, '', url)
   })
 
   function replaceStory(next: Story) {

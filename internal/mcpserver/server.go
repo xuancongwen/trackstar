@@ -61,6 +61,8 @@ stay in the current section; accepted stories cannot be moved.
 Types are feature, bug and chore. Features carry an estimate (points); bugs
 and chores only in projects with estimate_bugs_and_chores enabled.
 Labels are free text; an epic is a label with a description and progress.
+Write [#<id>] (e.g. "done in [#439]") in a description or comment to link
+another story; the web app turns it into a link. A bare #439 stays text.
 Projects can be named by numeric id or by slug. Users are referenced by id;
 list_users maps ids to names. Every change is recorded in the story's
 activity log under the token owner's name.`
