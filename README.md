@@ -670,6 +670,7 @@ Tools (a project is named by numeric id or slug):
 | `create_story` | title, type, estimate, section, owner, labels |
 | `update_story` | any field or the workflow `state`; `clear_owner` / `clear_estimate` to unset |
 | `move_story` | to a section, after `prev_id` or before `next_id`, or to the top |
+| `move_stories` | up to 50 stories of one project to one place, in the order given; each story succeeds or fails on its own and the result reports each |
 | `add_comment` | |
 | `list_epics` | epics with progress |
 | `velocity` | velocity plus per-iteration history |

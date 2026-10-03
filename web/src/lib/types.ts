@@ -82,6 +82,8 @@ export interface Project {
   can_write?: boolean
   /** Present on GET /api/projects/:id: whether the caller may manage members, settings, archiving and deletion. */
   can_manage?: boolean
+  /** Present on GET /api/projects: the caller starred it (listed first). */
+  starred?: boolean
 }
 
 export type Role = 'owner' | 'member'

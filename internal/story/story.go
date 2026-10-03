@@ -85,6 +85,10 @@ type CreateInput struct {
 	Section     Section  `json:"section"` // icebox (default), backlog or current
 	OwnerID     *int64   `json:"owner_id"`
 	Labels      []string `json:"labels"`
+	BlockedBy   []int64  `json:"blocked_by"`
+	// After places the story directly after this one in the same section,
+	// so a batch keeps its order. Not part of the API.
+	After *int64 `json:"-"`
 }
 
 // UpdateInput is a partial update; unset fields stay untouched.
@@ -178,6 +182,9 @@ func (s *Service) Create(ctx context.Context, projectID, actorID int64, in Creat
 		// New ideas land on top of the icebox where they get noticed; adding
 		// to backlog/current must not jump the queue, so those go last.
 		where := placement{bottom: in.Section != SectionIcebox}
+		if in.After != nil {
+			where = placement{prevID: in.After}
+		}
 		pos, _, err := place(ctx, q, projectID, in.Section, 0, where)
 		if err != nil {
 			return err
@@ -199,6 +206,11 @@ func (s *Service) Create(ctx context.Context, projectID, actorID int64, in Creat
 		}
 		if err := setLabels(ctx, q, projectID, row.ID, in.Labels); err != nil {
 			return err
+		}
+		if len(in.BlockedBy) > 0 {
+			if err := setBlockers(ctx, q, row, in.BlockedBy); err != nil {
+				return err
+			}
 		}
 		if err := s.record(ctx, q, row.ID, actorID, "created", "", string(in.Section)); err != nil {
 			return err

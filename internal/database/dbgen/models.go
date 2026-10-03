@@ -104,6 +104,12 @@ type ProjectMember struct {
 	Role      string
 }
 
+type ProjectStar struct {
+	UserID    int64
+	ProjectID int64
+	CreatedAt int64
+}
+
 type SavedFilter struct {
 	ID        int64
 	UserID    int64

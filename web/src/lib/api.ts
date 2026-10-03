@@ -89,6 +89,7 @@ export const api = {
   deleteProject: (id: number) => request<void>('DELETE', `/api/projects/${id}`),
   archiveProject: (id: number) => request<Project>('POST', `/api/projects/${id}/archive`),
   unarchiveProject: (id: number) => request<Project>('DELETE', `/api/projects/${id}/archive`),
+  setStarred: (id: number, starred: boolean) => request<void>(starred ? 'PUT' : 'DELETE', `/api/projects/${id}/star`),
 
   stories: (projectId: number, opts: { q?: string; done?: boolean; deleted?: boolean } = {}) => {
     const params = new URLSearchParams()

@@ -13,7 +13,44 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, projects)
+	starred, err := s.Projects.StarredIDs(r.Context(), u.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	type listed struct {
+		project.Project
+		Starred bool `json:"starred"`
+	}
+	out := make([]listed, len(projects))
+	for i, p := range projects {
+		out[i] = listed{p, starred[p.ID]}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleStarProject (PUT …/star) and handleUnstarProject (DELETE …/star)
+// mark a project for the caller's own list. Anyone who can see a project
+// may star it, archived or not.
+func (s *Server) handleStarProject(w http.ResponseWriter, r *http.Request) {
+	s.setStarred(w, r, true)
+}
+
+func (s *Server) handleUnstarProject(w http.ResponseWriter, r *http.Request) {
+	s.setStarred(w, r, false)
+}
+
+func (s *Server) setStarred(w http.ResponseWriter, r *http.Request, starred bool) {
+	p, err := s.projectFromPath(r, readAccess)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.Projects.SetStarred(r.Context(), p.ID, currentUser(r.Context()).ID, starred); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleOverview is what the projects page shows besides the list itself:

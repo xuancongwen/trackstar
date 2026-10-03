@@ -126,12 +126,38 @@ func TestCreate(t *testing.T) {
 func TestCreatePlacement(t *testing.T) {
 	f := setup(t)
 	f.create(t, "ice 1", story.SectionIcebox, 1)
-	f.create(t, "ice 2", story.SectionIcebox, 1)
-	f.create(t, "back 1", story.SectionBacklog, 1)
+	ice2 := f.create(t, "ice 2", story.SectionIcebox, 1)
+	back1 := f.create(t, "back 1", story.SectionBacklog, 1)
 	f.create(t, "back 2", story.SectionBacklog, 1)
 
 	assertOrder(t, f.titles(t, story.SectionIcebox), "ice 2", "ice 1") // newest idea on top
 	assertOrder(t, f.titles(t, story.SectionBacklog), "back 1", "back 2")
+
+	// After places a new story right behind another in its section.
+	if _, err := f.svc.Create(f.ctx, f.project.ID, f.user, story.CreateInput{Title: "ice 3", After: &ice2.ID}); err != nil {
+		t.Fatal(err)
+	}
+	assertOrder(t, f.titles(t, story.SectionIcebox), "ice 2", "ice 3", "ice 1")
+	if _, err := f.svc.Create(f.ctx, f.project.ID, f.user, story.CreateInput{Title: "x", After: &back1.ID}); apperr.KindOf(err) != apperr.KindInvalid {
+		t.Errorf("after a story in another section: err = %v", err)
+	}
+}
+
+func TestCreateBlockedBy(t *testing.T) {
+	f := setup(t)
+	a := f.create(t, "a", story.SectionBacklog, 1)
+	b, err := f.svc.Create(f.ctx, f.project.ID, f.user, story.CreateInput{Title: "b", BlockedBy: []int64{a.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.BlockedBy) != 1 || b.BlockedBy[0] != a.ID || !b.Blocked {
+		t.Fatalf("b = %+v", b)
+	}
+	// An invalid blocker refuses the whole create.
+	if _, err := f.svc.Create(f.ctx, f.project.ID, f.user, story.CreateInput{Title: "c", BlockedBy: []int64{999}}); apperr.KindOf(err) != apperr.KindInvalid {
+		t.Fatalf("unknown blocker: err = %v", err)
+	}
+	assertOrder(t, f.titles(t, story.SectionIcebox), "b")
 }
 
 func TestFullWorkflow(t *testing.T) {

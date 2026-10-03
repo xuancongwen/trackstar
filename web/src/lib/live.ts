@@ -31,8 +31,8 @@ export function connectLive(opts: LiveOptions): LiveConnection {
   let opened = false
   let pending = new Set<number>()
 
-  const schedule = (storyId?: number) => {
-    if (storyId) pending.add(storyId)
+  const schedule = (storyIds: number[] = []) => {
+    for (const id of storyIds) if (id) pending.add(id)
     clearTimeout(timer)
     timer = setTimeout(() => {
       timer = undefined
@@ -57,16 +57,18 @@ export function connectLive(opts: LiveOptions): LiveConnection {
   }
   const onEvent = (evt: MessageEvent) => {
     let client = ''
-    let storyId: number | undefined
+    const storyIds: number[] = []
     try {
       const data = JSON.parse(evt.data)
       client = data.client ?? ''
-      storyId = data.story_id
+      // A bulk change is one event listing its stories in story_ids.
+      if (typeof data.story_id === 'number') storyIds.push(data.story_id)
+      if (Array.isArray(data.story_ids)) storyIds.push(...data.story_ids.filter((id: unknown) => typeof id === 'number'))
     } catch {
       // malformed payload: still refetch, it is cheap
     }
     if (client !== '' && client === me) return
-    schedule(storyId)
+    schedule(storyIds)
   }
   source.addEventListener('stories', onEvent)
   source.addEventListener('project', onEvent)

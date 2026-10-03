@@ -94,6 +94,8 @@ func (s *Server) Handler() http.Handler {
 	authed("DELETE /api/projects/{project}", s.handleDeleteProject)
 	authed("POST /api/projects/{project}/archive", s.handleArchiveProject)
 	authed("DELETE /api/projects/{project}/archive", s.handleUnarchiveProject)
+	authed("PUT /api/projects/{project}/star", s.handleStarProject)
+	authed("DELETE /api/projects/{project}/star", s.handleUnstarProject)
 	authed("GET /api/projects/{project}/stories", s.handleListStories)
 	authed("POST /api/projects/{project}/stories", s.handleCreateStory)
 	authed("GET /api/projects/{project}/labels", s.handleListLabels)

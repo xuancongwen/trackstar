@@ -99,6 +99,7 @@ type Querier interface {
 	// Ordered ids/positions for one ordering scope. The caller passes the states
 	// that make up the section (see story.Section).
 	ListSectionPositions(ctx context.Context, arg ListSectionPositionsParams) ([]ListSectionPositionsRow, error)
+	ListStarredProjectIDs(ctx context.Context, userID int64) ([]int64, error)
 	ListStoryBlockers(ctx context.Context, storyID int64) ([]int64, error)
 	ListStoryLabels(ctx context.Context, storyID int64) ([]string, error)
 	ListTasks(ctx context.Context, storyID int64) ([]Task, error)
@@ -126,9 +127,11 @@ type Querier interface {
 	SetStoryDeleted(ctx context.Context, arg SetStoryDeletedParams) error
 	SetStoryPosition(ctx context.Context, arg SetStoryPositionParams) error
 	SetUserDefaultCombineIceboxBacklog(ctx context.Context, arg SetUserDefaultCombineIceboxBacklogParams) (User, error)
+	StarProject(ctx context.Context, arg StarProjectParams) error
 	TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error
 	TouchOAuthClient(ctx context.Context, arg TouchOAuthClientParams) error
 	TouchOAuthGrant(ctx context.Context, arg TouchOAuthGrantParams) error
+	UnstarProject(ctx context.Context, arg UnstarProjectParams) error
 	UpdateLabel(ctx context.Context, arg UpdateLabelParams) (Label, error)
 	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)
 	UpdateStory(ctx context.Context, arg UpdateStoryParams) (Story, error)

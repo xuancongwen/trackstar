@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -401,5 +402,69 @@ func TestNewProjectsTakeTheCreatorsDefault(t *testing.T) {
 	sam.must(http.StatusOK, "GET", "/api/projects/before", nil, &again)
 	if again.CombineIceboxBacklog {
 		t.Fatal("an existing project was changed")
+	}
+}
+
+func TestStarsArePersonal(t *testing.T) {
+	_, ts := newServer(t, true)
+	sam := newClient(t, ts)
+	sam.register("sam@example.com")
+	kim := newClient(t, ts)
+	kim.register("kim@example.com")
+
+	type proj struct {
+		ID      int64 `json:"id"`
+		Starred bool  `json:"starred"`
+	}
+	var apollo, gemini, private proj
+	sam.must(http.StatusCreated, "POST", "/api/projects", map[string]any{"name": "Apollo"}, &apollo)
+	sam.must(http.StatusCreated, "POST", "/api/projects", map[string]any{"name": "Gemini"}, &gemini)
+	sam.must(http.StatusCreated, "POST", "/api/projects", map[string]any{"name": "Private"}, &private)
+	// A new project is members-only (its creator owns it): let kim into two
+	// of Sam's three.
+	var kimMe struct {
+		ID int64 `json:"id"`
+	}
+	kim.must(http.StatusOK, "GET", "/api/me", nil, &kimMe)
+	for _, p := range []proj{apollo, gemini} {
+		sam.must(http.StatusOK, "PUT", fmt.Sprintf("/api/projects/%d/members/%d", p.ID, kimMe.ID), map[string]any{"role": "member"}, nil)
+	}
+
+	starred := func(c *client) map[int64]bool {
+		t.Helper()
+		var list []proj
+		c.must(http.StatusOK, "GET", "/api/projects", nil, &list)
+		out := map[int64]bool{}
+		for _, p := range list {
+			out[p.ID] = p.Starred
+		}
+		return out
+	}
+
+	sam.must(http.StatusNoContent, "PUT", fmt.Sprintf("/api/projects/%d/star", gemini.ID), nil, nil)
+	sam.must(http.StatusNoContent, "PUT", fmt.Sprintf("/api/projects/%d/star", gemini.ID), nil, nil) // idempotent
+	if got := starred(sam); !got[gemini.ID] || got[apollo.ID] {
+		t.Fatalf("sam's stars: %v", got)
+	}
+	if got := starred(kim); got[gemini.ID] {
+		t.Fatal("sam's star shows up for kim")
+	}
+
+	// A project the caller cannot see cannot be starred.
+	if code := kim.do("PUT", fmt.Sprintf("/api/projects/%d/star", private.ID), nil, nil); code != http.StatusNotFound {
+		t.Fatalf("starring an invisible project: %d", code)
+	}
+
+	// Archived projects can still be starred and unstarred.
+	sam.must(http.StatusOK, "POST", fmt.Sprintf("/api/projects/%d/archive", apollo.ID), nil, nil)
+	sam.must(http.StatusNoContent, "PUT", fmt.Sprintf("/api/projects/%d/star", apollo.ID), nil, nil)
+	if !starred(sam)[apollo.ID] {
+		t.Fatal("could not star an archived project")
+	}
+
+	sam.must(http.StatusNoContent, "DELETE", fmt.Sprintf("/api/projects/%d/star", gemini.ID), nil, nil)
+	sam.must(http.StatusNoContent, "DELETE", fmt.Sprintf("/api/projects/%d/star", gemini.ID), nil, nil) // idempotent
+	if starred(sam)[gemini.ID] {
+		t.Fatal("unstar did not stick")
 	}
 }

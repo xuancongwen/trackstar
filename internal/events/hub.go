@@ -13,12 +13,14 @@ import (
 )
 
 // Event describes one change. Client is the originating tab's id, so that
-// tab can ignore its own echo.
+// tab can ignore its own echo. A change to several stories at once is one
+// event listing them in StoryIDs, so a burst cannot overflow a subscriber.
 type Event struct {
-	Type      string `json:"type"` // "stories" | "project"
-	ProjectID int64  `json:"project_id"`
-	StoryID   int64  `json:"story_id,omitempty"`
-	Client    string `json:"client,omitempty"`
+	Type      string  `json:"type"` // "stories" | "project"
+	ProjectID int64   `json:"project_id"`
+	StoryID   int64   `json:"story_id,omitempty"`
+	StoryIDs  []int64 `json:"story_ids,omitempty"`
+	Client    string  `json:"client,omitempty"`
 }
 
 // bufferSize events may queue per subscriber before it is considered stuck.

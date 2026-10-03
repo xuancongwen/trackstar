@@ -90,6 +90,30 @@ try {
   await page.goto(trackstar.base + '/#/', { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('main > ul li .summary')
 
+  // Stars: personal, listed first, and a filter for only them.
+  const star = (name) => page.click(`main li button.star[aria-label$=" ${name}"]`)
+  t.eq('no starred filter before anything is starred', await page.$('button.starred-only'), null)
+  await star('Quiet')
+  await page.waitForFunction(() => document.querySelector('main > ul li a strong')?.textContent === 'Quiet')
+  t.eq('starring does not open the project', await page.evaluate(() => location.hash), '#/')
+  t.eq('a starred project comes first', await names(), ['Quiet', 'Apollo', 'Aardvark'])
+  await star('Aardvark')
+  await page.waitForFunction(() => document.querySelectorAll('main li button.star.on').length === 2)
+  t.eq('starred ones first, each group in the chosen order', await names(), ['Aardvark', 'Quiet', 'Apollo'])
+  t.eq('stars are stored on the server', (await api('GET', '/api/projects')).filter((p) => p.starred).map((p) => p.name).sort(), ['Aardvark', 'Quiet'])
+  await page.click('button.starred-only')
+  t.eq('the filter shows only starred projects', await names(), ['Aardvark', 'Quiet'])
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('main > ul li .summary')
+  t.eq('stars and the filter survive a reload', [await page.$eval('button.starred-only', (b) => b.getAttribute('aria-pressed')), await names()], ['true', ['Aardvark', 'Quiet']])
+  await star('Aardvark')
+  await star('Quiet')
+  await page.waitForSelector('main [role="status"] button.link')
+  t.eq('with nothing starred, the filter says so', await page.$eval('main [role="status"]', (e) => e.textContent.trim().startsWith('No starred projects.')), true)
+  await page.click('main [role="status"] button.link')
+  t.eq('and offers the way back to all projects', await names(), ['Apollo', 'Aardvark', 'Quiet'])
+  t.eq('the filter hides itself once nothing is starred', await page.$('button.starred-only'), null)
+
   // The account menu is on this page too, not only on a board.
   const menuItems = async (p) => {
     await p.click('header .menu > button')

@@ -179,6 +179,33 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 	return items, nil
 }
 
+const listStarredProjectIDs = `-- name: ListStarredProjectIDs :many
+SELECT project_id FROM project_stars WHERE user_id = ?1
+`
+
+func (q *Queries) ListStarredProjectIDs(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listStarredProjectIDs, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var project_id int64
+		if err := rows.Scan(&project_id); err != nil {
+			return nil, err
+		}
+		items = append(items, project_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setProjectArchived = `-- name: SetProjectArchived :one
 UPDATE projects
 SET archived_at = ?1,
@@ -211,6 +238,37 @@ func (q *Queries) SetProjectArchived(ctx context.Context, arg SetProjectArchived
 		&i.CombineIceboxBacklog,
 	)
 	return i, err
+}
+
+const starProject = `-- name: StarProject :exec
+INSERT INTO project_stars (user_id, project_id, created_at)
+VALUES (?1, ?2, ?3)
+ON CONFLICT (user_id, project_id) DO NOTHING
+`
+
+type StarProjectParams struct {
+	UserID    int64
+	ProjectID int64
+	Now       int64
+}
+
+func (q *Queries) StarProject(ctx context.Context, arg StarProjectParams) error {
+	_, err := q.db.ExecContext(ctx, starProject, arg.UserID, arg.ProjectID, arg.Now)
+	return err
+}
+
+const unstarProject = `-- name: UnstarProject :exec
+DELETE FROM project_stars WHERE user_id = ?1 AND project_id = ?2
+`
+
+type UnstarProjectParams struct {
+	UserID    int64
+	ProjectID int64
+}
+
+func (q *Queries) UnstarProject(ctx context.Context, arg UnstarProjectParams) error {
+	_, err := q.db.ExecContext(ctx, unstarProject, arg.UserID, arg.ProjectID)
+	return err
 }
 
 const updateProject = `-- name: UpdateProject :one

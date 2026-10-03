@@ -58,6 +58,16 @@ describe('connectLive', () => {
     expect(onChange).toHaveBeenCalledWith([1, 2])
   })
 
+  it('collects the stories of a bulk change from story_ids', () => {
+    connect()
+    const es = FakeEventSource.instances[0]
+    es.emit('stories', { client: 'mcp', story_ids: [3, 4, 5] })
+    es.emit('stories', { client: 'mcp', story_id: 6 })
+    vi.advanceTimersByTime(200)
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith([3, 4, 5, 6])
+  })
+
   it('ignores echoes of this tab but not events without a client', () => {
     connect()
     const es = FakeEventSource.instances[0]

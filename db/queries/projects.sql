@@ -44,3 +44,14 @@ SET archived_at = sqlc.narg(archived_at),
     updated_at = sqlc.arg(now)
 WHERE id = sqlc.arg(id)
 RETURNING *;
+
+-- name: StarProject :exec
+INSERT INTO project_stars (user_id, project_id, created_at)
+VALUES (sqlc.arg(user_id), sqlc.arg(project_id), sqlc.arg(now))
+ON CONFLICT (user_id, project_id) DO NOTHING;
+
+-- name: UnstarProject :exec
+DELETE FROM project_stars WHERE user_id = sqlc.arg(user_id) AND project_id = sqlc.arg(project_id);
+
+-- name: ListStarredProjectIDs :many
+SELECT project_id FROM project_stars WHERE user_id = sqlc.arg(user_id);

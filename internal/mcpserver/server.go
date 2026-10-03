@@ -56,7 +56,9 @@ delivered -> accepted (or rejected, which goes back to started). Set "state"
 with update_story to advance work; use move_story to change section or
 priority. A move names a neighbour (prev_id or next_id) in the target
 section, or neither to put the story at the top. Started or later stories
-stay in the current section; accepted stories cannot be moved.
+stay in the current section; accepted stories cannot be moved. To order
+several stories, use move_stories: one call places them all, in the order
+given, at one point.
 
 Types are feature, bug and chore. Features carry an estimate (points); bugs
 and chores only in projects with estimate_bugs_and_chores enabled.
@@ -180,6 +182,14 @@ func (s *server) storyProject(ctx context.Context, id int64, write bool) (int64,
 func (s *server) publish(projectID, storyID int64) {
 	if s.deps.Events != nil {
 		s.deps.Events.Publish(events.Event{Type: "stories", ProjectID: projectID, StoryID: storyID, Client: clientID})
+	}
+}
+
+// publishMany announces a change to several stories of one project as one
+// event, so a bulk tool cannot overflow a board's event buffer.
+func (s *server) publishMany(projectID int64, storyIDs []int64) {
+	if s.deps.Events != nil && len(storyIDs) > 0 {
+		s.deps.Events.Publish(events.Event{Type: "stories", ProjectID: projectID, StoryIDs: storyIDs, Client: clientID})
 	}
 }
 

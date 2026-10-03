@@ -17,6 +17,7 @@
   import { blockingSet, matches as matchesFilter, parseQuery } from '../lib/filter'
   import { connectLive, type LiveStatus } from '../lib/live'
   import { formatRange } from '../lib/format'
+  import { starredFirst } from '../lib/projects'
   import type { DropSection, Epic, Iteration, Member, NewStory, Project, SavedFilter, Story, StoryPatch, StoryState, User, Velocity } from '../lib/types'
   import AccountDialog from './AccountDialog.svelte'
   import DonePanel from './DonePanel.svelte'
@@ -641,8 +642,9 @@
             {#if allProjects === null}
               <span class="muted">Loading…</span>
             {:else}
-              {#each allProjects.filter((p) => !p.archived_at || p.id === project?.id) as p (p.id)}
+              {#each starredFirst(allProjects.filter((p) => !p.archived_at || p.id === project?.id)) as p (p.id)}
                 <button role="option" aria-selected={p.id === project.id} class:current={p.id === project.id} onclick={() => switchTo(p)}>
+                  {#if p.starred}<span class="star" aria-label="starred">★</span>{/if}
                   {p.name}
                 </button>
               {/each}
@@ -1179,6 +1181,9 @@
   .switcher-items button:hover,
   .switcher-items a:hover {
     background: var(--row-hover);
+  }
+  .switcher-items .star {
+    color: var(--feature);
   }
   .switcher-items button.current {
     font-weight: 600;

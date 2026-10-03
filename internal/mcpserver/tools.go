@@ -66,6 +66,7 @@ func (s *server) addTools(srv *mcp.Server) {
 	tool(srv, &mcp.Tool{Name: "create_story", Description: "Create a story in a project. New stories go to the bottom of the icebox unless section is given.", Annotations: additive}, s.createStory)
 	tool(srv, &mcp.Tool{Name: "update_story", Description: "Change a story's fields or advance its workflow state. Omitted fields are left alone.", Annotations: updates}, s.updateStory)
 	tool(srv, &mcp.Tool{Name: "move_story", Description: "Move a story to a section and position: after prev_id, before next_id, or to the top of the section when neither is given.", Annotations: updates}, s.moveStory)
+	tool(srv, &mcp.Tool{Name: "move_stories", Description: "Move up to 50 stories of one project to a section, in the order given: the first goes after prev_id, before next_id, or to the top of the section, and each next one right after the previous one moved. A story that cannot be moved is reported in its result and the others still move.", Annotations: updates}, s.moveStories)
 	tool(srv, &mcp.Tool{Name: "add_comment", Description: "Add a comment to a story.", Annotations: additive}, s.addComment)
 	tool(srv, &mcp.Tool{Name: "list_epics", Description: "List a project's epics with their progress (accepted vs total points and stories).", Annotations: readOnly}, s.listEpics)
 	tool(srv, &mcp.Tool{Name: "velocity", Description: "A project's velocity and its iteration history (points accepted per iteration, including the current one).", Annotations: readOnly}, s.velocity)
@@ -280,6 +281,108 @@ func (s *server) moveStory(ctx context.Context, _ *mcp.CallToolRequest, in moveS
 	}
 	s.publish(res.Story.ProjectID, res.Story.ID)
 	return nil, res, nil
+}
+
+// maxBulk is how many items one bulk tool call may carry.
+const maxBulk = 50
+
+// itemResult reports one item of a bulk call. Results come back in input
+// order; a failed item carries the error and leaves the others alone.
+type itemResult struct {
+	ID      int64         `json:"id,omitempty"`
+	OK      bool          `json:"ok"`
+	Title   string        `json:"title,omitempty"`
+	Section story.Section `json:"section,omitempty"`
+	State   story.State   `json:"state,omitempty"`
+	Error   string        `json:"error,omitempty"`
+}
+
+type bulkOut struct {
+	Results   []itemResult `json:"results"`
+	Succeeded int          `json:"succeeded"`
+	Failed    int          `json:"failed"`
+}
+
+func (o *bulkOut) add(r itemResult) {
+	o.Results = append(o.Results, r)
+	if r.OK {
+		o.Succeeded++
+	} else {
+		o.Failed++
+	}
+}
+
+func (s *server) itemFailed(id int64, err error) itemResult {
+	return itemResult{ID: id, Error: s.fail(err).Error()}
+}
+
+func itemDone(st story.Story) itemResult {
+	return itemResult{ID: st.ID, OK: true, Title: st.Title, Section: st.Section, State: st.State}
+}
+
+func checkBulkSize(n int) error {
+	if n == 0 || n > maxBulk {
+		return apperr.Invalid("give between 1 and %d items", maxBulk)
+	}
+	return nil
+}
+
+type moveStoriesIn struct {
+	IDs     []int64 `json:"ids" jsonschema:"story ids, in the order they should end up"`
+	Section string  `json:"section" jsonschema:"icebox, backlog or current"`
+	PrevID  *int64  `json:"prev_id,omitempty" jsonschema:"place the first story directly after this one"`
+	NextID  *int64  `json:"next_id,omitempty" jsonschema:"place the first story directly before this one"`
+}
+
+// moveStories moves each story on its own (one transaction per story), so
+// one that cannot move does not hold back the rest. Every story must belong
+// to the project of the first one that resolves.
+func (s *server) moveStories(ctx context.Context, _ *mcp.CallToolRequest, in moveStoriesIn) (*mcp.CallToolResult, bulkOut, error) {
+	if err := checkBulkSize(len(in.IDs)); err != nil {
+		return nil, bulkOut{}, err
+	}
+	for _, id := range in.IDs {
+		if (in.PrevID != nil && *in.PrevID == id) || (in.NextID != nil && *in.NextID == id) {
+			return nil, bulkOut{}, apperr.Invalid("the drop target cannot be one of the moved stories")
+		}
+	}
+	u, err := userFrom(ctx)
+	if err != nil {
+		return nil, bulkOut{}, err
+	}
+	out := bulkOut{Results: make([]itemResult, 0, len(in.IDs))}
+	var projectID int64
+	var moved []int64
+	seen := map[int64]bool{}
+	prev, next := in.PrevID, in.NextID
+	for _, id := range in.IDs {
+		if seen[id] {
+			out.add(itemResult{ID: id, Error: "listed twice; moved at its first position"})
+			continue
+		}
+		seen[id] = true
+		pid, err := s.storyProject(ctx, id, true)
+		if err != nil {
+			out.add(s.itemFailed(id, err))
+			continue
+		}
+		if projectID == 0 {
+			projectID = pid
+		} else if pid != projectID {
+			out.add(itemResult{ID: id, Error: "belongs to another project than the stories before it"})
+			continue
+		}
+		res, err := s.deps.Stories.Move(ctx, id, u.ID, story.MoveInput{Section: story.Section(in.Section), PrevID: prev, NextID: next})
+		if err != nil {
+			out.add(s.itemFailed(id, err))
+			continue
+		}
+		out.add(itemDone(res.Story))
+		moved = append(moved, id)
+		prev, next = &id, nil
+	}
+	s.publishMany(projectID, moved)
+	return nil, out, nil
 }
 
 type addCommentIn struct {

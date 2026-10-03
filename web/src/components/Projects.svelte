@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import { timeAgo } from '../lib/format'
+  import { starredFirst } from '../lib/projects'
   import type { Project, ProjectStats, User } from '../lib/types'
   import AccountDialog from './AccountDialog.svelte'
   import ActivitySpark from './ActivitySpark.svelte'
@@ -33,18 +34,40 @@
     }
   }
 
+  // Show only starred projects. Also a viewing habit, kept like the sort.
+  const STARRED_KEY = 'trackstar.projects.starredOnly'
+  function storedStarredOnly(): boolean {
+    try {
+      return localStorage.getItem(STARRED_KEY) === '1'
+    } catch {
+      return false
+    }
+  }
+  let starredOnly = $state(storedStarredOnly())
+  function toggleStarredOnly() {
+    starredOnly = !starredOnly
+    try {
+      localStorage.setItem(STARRED_KEY, starredOnly ? '1' : '0')
+    } catch {
+      // Private browsing: the choice lasts until the page is left.
+    }
+  }
+
   let projects = $state<Project[]>([])
   let byName = $derived(projects.filter((p) => !p.archived_at).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })))
   // Busiest first: the sort is stable, so equally busy (or equally quiet)
   // projects stay in name order.
-  let active = $derived(sortBy === 'name' ? byName : [...byName].sort((a, b) => recentChanges(b) - recentChanges(a)))
-  let archived = $derived(projects.filter((p) => p.archived_at))
+  // Starred projects always come first, each group in the chosen order.
+  let active = $derived(starredFirst(sortBy === 'name' ? byName : [...byName].sort((a, b) => recentChanges(b) - recentChanges(a))))
+  let archived = $derived(starredFirst(projects.filter((p) => p.archived_at)))
+  let anyStarred = $derived(projects.some((p) => p.starred))
 
   // Typing narrows both lists by name; Enter opens the only project left.
   let search = $state('')
   let searchInput = $state<HTMLInputElement>()
   let needle = $derived(search.trim().toLowerCase())
-  const matching = (list: Project[]) => (needle ? list.filter((p) => p.name.toLowerCase().includes(needle)) : list)
+  const matching = (list: Project[]) =>
+    list.filter((p) => (!starredOnly || p.starred) && (!needle || p.name.toLowerCase().includes(needle)))
   let shownActive = $derived(matching(active))
   let shownArchived = $derived(matching(archived))
   let loaded = $state(false)
@@ -82,6 +105,19 @@
     if (s.to_accept > 0) parts.push(`${s.to_accept} to accept`)
     if (s.last_activity_at) parts.push(timeAgo(s.last_activity_at))
     return parts.join(' · ')
+  }
+
+  // Optimistic: the star flips at once and flips back if the server says no.
+  async function toggleStar(p: Project) {
+    const starred = !p.starred
+    const set = (value: boolean) => (projects = projects.map((x) => (x.id === p.id ? { ...x, starred: value } : x)))
+    set(starred)
+    try {
+      await api.setStarred(p.id, starred)
+    } catch (err) {
+      set(!starred)
+      error = (err as Error).message
+    }
   }
 
   async function create(event: SubmitEvent) {
@@ -159,6 +195,11 @@
         <option value="name">By name</option>
       </select>
     {/if}
+    {#if anyStarred || starredOnly}
+      <button class="starred-only" class:on={starredOnly} aria-pressed={starredOnly} onclick={toggleStarredOnly} title="Show only starred projects">
+        ★ Starred
+      </button>
+    {/if}
     {#if projects.length > 0}
       <input
         class="search"
@@ -175,7 +216,11 @@
   {#if loaded && projects.length === 0}
     <p class="muted">No projects yet. Create the first one below.</p>
   {:else if loaded && needle && shownActive.length + shownArchived.length === 0}
-    <p class="muted" role="status">No project matches “{search.trim()}”.</p>
+    <p class="muted" role="status">No {starredOnly ? 'starred ' : ''}project matches “{search.trim()}”.</p>
+  {:else if loaded && starredOnly && shownActive.length + shownArchived.length === 0}
+    <p class="muted" role="status">
+      No starred projects. Star one with ☆, or <button class="link" onclick={toggleStarredOnly}>show all projects</button>.
+    </p>
   {:else if loaded && active.length === 0}
     <p class="muted">No active projects. Create one below, or unarchive one from its settings.</p>
   {/if}
@@ -183,6 +228,7 @@
   <ul>
     {#each loaded ? shownActive : [] as p (p.id)}
       <li>
+        {@render star(p)}
         <a href={`#/p/${p.slug}`}>
           <strong>{p.name}</strong>
           <span class="muted summary">{summary(p) || 'no activity yet'}</span>
@@ -198,6 +244,7 @@
       <ul>
         {#each shownArchived as p (p.id)}
           <li>
+            {@render star(p)}
             <a href={`#/p/${p.slug}`}>
               <strong>{p.name}</strong>
               <span class="muted">read-only</span>
@@ -207,6 +254,17 @@
       </ul>
     </details>
   {/if}
+
+  {#snippet star(p: Project)}
+    <button
+      class="star"
+      class:on={p.starred}
+      aria-pressed={p.starred === true}
+      aria-label={`${p.starred ? 'Unstar' : 'Star'} ${p.name}`}
+      title={p.starred ? 'Unstar' : 'Star: list it first'}
+      onclick={() => toggleStar(p)}>{p.starred ? '★' : '☆'}</button
+    >
+  {/snippet}
 
   <form onsubmit={create}>
     <input bind:value={name} placeholder="New project name" required maxlength="100" />
@@ -308,19 +366,48 @@
     display: grid;
     gap: 6px;
   }
+  /* The star sits outside the link, so starring never opens the project. */
+  li {
+    display: flex;
+    align-items: stretch;
+    background: var(--row);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .star {
+    flex: none;
+    width: 40px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 19px;
+  }
+  .star:hover {
+    color: var(--feature);
+  }
+  .star.on {
+    color: var(--feature);
+  }
+  .starred-only.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+  }
   li a {
+    flex: 1;
+    min-width: 0;
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 12px;
-    padding: 10px 12px;
-    background: var(--row);
-    border: 1px solid var(--border);
-    border-radius: 6px;
+    padding: 10px 12px 10px 0;
     text-decoration: none;
     color: inherit;
   }
-  li a:hover {
+  li:hover {
     background: var(--row-hover);
   }
   li a strong {

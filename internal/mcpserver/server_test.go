@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -120,7 +121,7 @@ func TestToolsAreListedWithSchemas(t *testing.T) {
 			t.Errorf("%s has no input schema", tool.Name)
 		}
 	}
-	want := []string{"add_comment", "create_story", "get_story", "list_epics", "list_projects", "list_stories", "list_users", "move_story", "update_story", "velocity"}
+	want := []string{"add_comment", "create_story", "get_story", "list_epics", "list_projects", "list_stories", "list_users", "move_stories", "move_story", "update_story", "velocity"}
 	got := strings.Join(sorted(names), ",")
 	if got != strings.Join(want, ",") {
 		t.Fatalf("tools = %s", got)
@@ -280,6 +281,114 @@ func TestWorkflowThroughTools(t *testing.T) {
 	templates, err := cs.ListResourceTemplates(ctx, nil)
 	if err != nil || len(templates.ResourceTemplates) != 2 {
 		t.Fatalf("templates = %+v, %v", templates, err)
+	}
+}
+
+func TestMoveStories(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	p, _ := f.deps.Projects.Create(ctx, f.admin.ID, project.Input{Name: ptr("Apollo")}) // kim is not a member
+	other, _ := f.deps.Projects.Create(ctx, 0, project.Input{Name: ptr("Other")})
+	mk := func(projectID int64, title string, sec story.Section) story.Story {
+		t.Helper()
+		st, err := f.deps.Stories.Create(ctx, projectID, f.admin.ID, story.CreateInput{Title: title, Section: sec, Type: story.TypeChore})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	anchor := mk(p.ID, "Anchor", story.SectionBacklog)
+	tail := mk(p.ID, "Tail", story.SectionBacklog)
+	a := mk(p.ID, "A", story.SectionIcebox)
+	b := mk(p.ID, "B", story.SectionIcebox)
+	c := mk(p.ID, "C", story.SectionIcebox)
+	started := mk(p.ID, "Started", story.SectionCurrent)
+	if _, err := f.deps.Stories.Update(ctx, started.ID, story.Actor{ID: f.admin.ID}, story.UpdateInput{State: ptr(story.StateStarted)}); err != nil {
+		t.Fatal(err)
+	}
+	trashed := mk(p.ID, "Trashed", story.SectionIcebox)
+	if _, err := f.deps.Stories.Delete(ctx, trashed.ID, f.admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	foreign := mk(other.ID, "Foreign", story.SectionIcebox)
+
+	evs, unsubscribe := f.deps.Events.Subscribe(p.ID)
+	defer unsubscribe()
+	cs := f.connect(t, f.admin)
+
+	// The movable stories land after the anchor in the order given, each
+	// after the previous one moved; the refused ones are reported and skip
+	// nothing else.
+	var out bulkOut
+	mustCall(t, cs, "move_stories", map[string]any{
+		"ids":     []int64{c.ID, started.ID, a.ID, trashed.ID, 999, foreign.ID, b.ID, a.ID},
+		"section": "backlog", "prev_id": anchor.ID,
+	}, &out)
+	if out.Succeeded != 3 || out.Failed != 5 || len(out.Results) != 8 {
+		t.Fatalf("out = %+v", out)
+	}
+	for i, wantErr := range []string{"", "current iteration", "", "trash", "not found", "another project", "", "listed twice"} {
+		r := out.Results[i]
+		if wantErr == "" {
+			if !r.OK || r.Section != story.SectionBacklog || r.State != story.StateBacklog || r.Title == "" {
+				t.Errorf("result %d = %+v", i, r)
+			}
+		} else if r.OK || !strings.Contains(r.Error, wantErr) {
+			t.Errorf("result %d = %+v, want error containing %q", i, r, wantErr)
+		}
+	}
+	var list storiesOut
+	mustCall(t, cs, "list_stories", map[string]any{"project": "apollo", "section": "backlog"}, &list)
+	if got, want := ids(list.Stories), []int64{anchor.ID, c.ID, a.ID, b.ID, tail.ID}; !slices.Equal(got, want) {
+		t.Fatalf("backlog = %v, want %v", got, want)
+	}
+
+	// One event for the whole call, naming the stories that moved.
+	select {
+	case ev := <-evs:
+		if ev.Client != clientID || !slices.Equal(ev.StoryIDs, []int64{c.ID, a.ID, b.ID}) {
+			t.Fatalf("event = %+v", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no change event published")
+	}
+	select {
+	case ev := <-evs:
+		t.Fatalf("second event %+v", ev)
+	default:
+	}
+
+	// With neither neighbour the first goes to the top; next_id places the
+	// first before that story.
+	mustCall(t, cs, "move_stories", map[string]any{"ids": []int64{b.ID, a.ID}, "section": "icebox"}, &out)
+	mustCall(t, cs, "move_stories", map[string]any{"ids": []int64{c.ID}, "section": "icebox", "next_id": a.ID}, &out)
+	mustCall(t, cs, "list_stories", map[string]any{"project": "apollo", "section": "icebox"}, &list)
+	if got, want := ids(list.Stories), []int64{b.ID, c.ID, a.ID}; !slices.Equal(got, want) {
+		t.Fatalf("icebox = %v, want %v", got, want)
+	}
+
+	// Whole-call errors change nothing.
+	if msg := call(t, cs, "move_stories", map[string]any{"ids": []int64{a.ID, b.ID}, "section": "backlog", "prev_id": a.ID}, nil); !strings.Contains(msg, "drop target") {
+		t.Fatalf("drop target among moved: %q", msg)
+	}
+	if msg := call(t, cs, "move_stories", map[string]any{"ids": []int64{}, "section": "backlog"}, nil); !strings.Contains(msg, "between 1 and 50") {
+		t.Fatalf("no ids: %q", msg)
+	}
+	tooMany := make([]int64, 51)
+	for i := range tooMany {
+		tooMany[i] = a.ID
+	}
+	if msg := call(t, cs, "move_stories", map[string]any{"ids": tooMany, "section": "backlog"}, nil); !strings.Contains(msg, "between 1 and 50") {
+		t.Fatalf("51 ids: %q", msg)
+	}
+	mustCall(t, cs, "list_stories", map[string]any{"project": "apollo", "section": "icebox"}, &list)
+	if got, want := ids(list.Stories), []int64{b.ID, c.ID, a.ID}; !slices.Equal(got, want) {
+		t.Fatalf("icebox after refused calls = %v, want %v", got, want)
+	}
+
+	// Kim is not a member: every story reads as not found, nothing moves.
+	if err := call(t, f.connect(t, f.kim), "move_stories", map[string]any{"ids": []int64{a.ID}, "section": "backlog"}, &out); err != "" || out.Failed != 1 || !strings.Contains(out.Results[0].Error, "not found") {
+		t.Fatalf("non-member: %q %+v", err, out)
 	}
 }
 
