@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte'
+  import { onMount, tick, untrack } from 'svelte'
   import { api, ApiError } from '../lib/api'
   import {
     acceptedThisIteration,
@@ -291,10 +291,14 @@
   }
 
   // The URL names the open story, so the address bar can be copied as a link.
+  // Only opening or closing a story rewrites it: a background refresh that
+  // replaces `project` must not, or it could undo a link the app is still
+  // following.
   $effect(() => {
     const id = openId
-    if (!project || !linkReady) return
-    const url = `#/p/${project.slug}` + (id === null ? '' : `/s/${id}`)
+    const slug = untrack(() => project?.slug)
+    if (!slug || !linkReady) return
+    const url = `#/p/${slug}` + (id === null ? '' : `/s/${id}`)
     if (location.hash !== url) history.replaceState(history.state, '', url)
   })
 
