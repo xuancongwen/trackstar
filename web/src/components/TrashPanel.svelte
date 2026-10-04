@@ -67,6 +67,13 @@
     flex: 1;
     overflow-y: auto;
   }
+  /* Phone layout: room to scroll the last row out from under the floating
+     + button, as in Panel. */
+  @media (max-width: 900px) {
+    .scroll {
+      padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    }
+  }
   .row {
     display: flex;
     align-items: center;

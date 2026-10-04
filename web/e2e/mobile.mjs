@@ -190,6 +190,21 @@ try {
     t.eq(`${item} in landscape: clean, Save reachable`, [await problems(), await reachable('Save')], [[], true])
     await closeDialog()
   }
+
+  // A panel longer than the screen: scrolled to the end, the last row's
+  // buttons clear the floating + button.
+  for (let i = 0; i < 20; i++) await api('POST', `/api/projects/${project.id}/stories`, { title: `Filler ${i}`, type: 'bug', section: 'current' })
+  await screen(390, 844)
+  t.eq(
+    'last row scrolls clear of the floating +',
+    await page.evaluate(() => {
+      document.querySelector('main .scroll').scrollTop = 1e6
+      const fab = document.querySelector('.fab').getBoundingClientRect()
+      const last = [...document.querySelectorAll('main [data-story-id]')].at(-1)
+      return [...last.querySelectorAll('button')].every((b) => b.getBoundingClientRect().bottom <= fab.top)
+    }),
+    true,
+  )
 } finally {
   await browser.close()
   trackstar.stop()

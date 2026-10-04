@@ -203,8 +203,10 @@
     outline-offset: -4px;
     transition: outline-color 120ms;
   }
+  /* Grow to fill, but never shrink below the rows: a shrunk list lets them
+     overflow past the .scroll padding. */
   .list.fill {
-    flex: 1;
+    flex: 1 0 auto;
   }
   .list.dragging {
     outline-color: var(--border);
