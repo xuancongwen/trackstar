@@ -310,4 +310,14 @@
   .action.reject {
     background: var(--danger);
   }
+  /* One rule for every tone: shift the button's own colour rather than
+     replacing it, darker on the light theme and lighter on the dark one. */
+  .action:hover:not(:disabled) {
+    filter: brightness(0.88);
+  }
+  @media (prefers-color-scheme: dark) {
+    .action:hover:not(:disabled) {
+      filter: brightness(1.2);
+    }
+  }
 </style>

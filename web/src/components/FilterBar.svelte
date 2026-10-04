@@ -128,6 +128,13 @@
     background: var(--accent);
     color: var(--accent-text);
   }
+  .filter > button:hover:not(:disabled):not(.on) {
+    background: var(--head-hover);
+    border-color: var(--head-hover-border);
+  }
+  .filter > button.on:hover:not(:disabled) {
+    filter: brightness(1.12);
+  }
   .menu-backdrop {
     position: fixed;
     inset: 0;

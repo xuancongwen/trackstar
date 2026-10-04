@@ -22,6 +22,9 @@
   --finish: #1f4e8c;
   --deliver: #e67e22;
   --accept: #4c9f38;
+  /* Ghost buttons on the dark panel header, hovered (same in both themes). */
+  --head-hover: rgba(255, 255, 255, 0.14);
+  --head-hover-border: rgba(255, 255, 255, 0.6);
   --shadow: 0 8px 30px rgba(15, 23, 42, 0.25);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 13px;
@@ -138,6 +141,33 @@ button.link {
   background: none;
   padding: 0;
   color: var(--accent);
+}
+
+/* Hover states. :where() keeps them at zero specificity so a component that
+   styles its own buttons (the story row's action strip) is never overridden. */
+:where(button:hover:not(:disabled)) {
+  background: var(--row-hover);
+  border-color: var(--muted);
+}
+
+:where(button.danger:hover:not(:disabled)) {
+  background: var(--row-rejected);
+  border-color: var(--danger);
+}
+
+/* Filled buttons keep their colour, a shade darker (lighter on dark). */
+:where(button.primary, .estimates button.active):where(:hover:not(:disabled)) {
+  filter: brightness(0.88);
+}
+
+:where(button.link:hover:not(:disabled)) {
+  text-decoration: underline;
+}
+
+@media (prefers-color-scheme: dark) {
+  :where(button.primary, .estimates button.active):where(:hover:not(:disabled)) {
+    filter: brightness(1.2);
+  }
 }
 
 a {

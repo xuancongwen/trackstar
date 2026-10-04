@@ -182,6 +182,10 @@
     color: inherit;
     border-color: rgba(255, 255, 255, 0.35);
   }
+  .add:hover:not(:disabled) {
+    background: var(--head-hover);
+    border-color: var(--head-hover-border);
+  }
   .scroll {
     flex: 1;
     overflow-y: auto;

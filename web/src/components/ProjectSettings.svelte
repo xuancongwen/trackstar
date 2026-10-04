@@ -294,6 +294,9 @@
     color: var(--danger);
     border-color: currentColor;
   }
+  button.destructive:hover:not(:disabled) {
+    background: var(--row-rejected);
+  }
   button.destructive:disabled {
     opacity: 0.5;
   }

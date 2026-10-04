@@ -308,6 +308,13 @@
     border-color: var(--accent);
     color: var(--accent-text);
   }
+  .menu > button:hover:not(:disabled):not(.on) {
+    background: var(--head-hover);
+    border-color: var(--head-hover-border);
+  }
+  .menu > button.on:hover:not(:disabled) {
+    filter: brightness(1.12);
+  }
   .who {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -395,6 +402,14 @@
     background: var(--accent);
     border-color: var(--accent);
     color: var(--accent-text);
+  }
+  .starred-only.on:hover {
+    filter: brightness(0.88);
+  }
+  @media (prefers-color-scheme: dark) {
+    .starred-only.on:hover {
+      filter: brightness(1.2);
+    }
   }
   li a {
     flex: 1;

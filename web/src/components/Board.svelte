@@ -893,6 +893,16 @@
     border-color: var(--accent);
     color: var(--accent-text);
   }
+  .topbar button:hover:not(:disabled):not(.on) {
+    background: var(--head-hover);
+    border-color: var(--head-hover-border);
+  }
+  .topbar button.on:hover:not(:disabled) {
+    filter: brightness(1.12);
+  }
+  button.chip:hover {
+    background: rgba(255, 255, 255, 0.24);
+  }
   .home {
     color: inherit;
     opacity: 0.7;
@@ -1011,6 +1021,9 @@
     background: var(--bg);
     color: var(--text);
   }
+  .tabs button:hover:not(.on) {
+    background: rgba(255, 255, 255, 0.16);
+  }
   .tabs .count {
     margin-left: 4px;
     font-weight: 400;
@@ -1030,6 +1043,14 @@
     line-height: 1;
     box-shadow: var(--shadow);
     z-index: 15;
+  }
+  .fab:hover {
+    filter: brightness(0.88);
+  }
+  @media (prefers-color-scheme: dark) {
+    .fab:hover {
+      filter: brightness(1.2);
+    }
   }
   .menu-items .sep {
     border-top: 1px solid var(--border);

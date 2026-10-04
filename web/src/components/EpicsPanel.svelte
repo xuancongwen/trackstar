@@ -149,6 +149,10 @@
     padding: 0 7px;
     font-size: 11px;
   }
+  .clear:hover:not(:disabled) {
+    background: var(--head-hover);
+    border-color: var(--head-hover-border);
+  }
   .scroll {
     flex: 1;
     overflow-y: auto;
@@ -176,6 +180,9 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .name:hover {
+    text-decoration: underline;
   }
   .points {
     font-size: 11px;
