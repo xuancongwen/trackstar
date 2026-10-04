@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from '../lib/api'
-  import { ESTIMATES, SECTION_TITLES, canDrop, canEstimate, nextActions } from '../lib/board'
+  import { ESTIMATES, SECTION_TITLES, canDrop, canEstimate } from '../lib/board'
   import { formatDayTime } from '../lib/format'
   import { storyHref } from '../lib/links'
   import LinkedText from './LinkedText.svelte'
@@ -230,16 +230,10 @@
       <span class="muted">read-only</span>
     {:else if trashed}
       <button class="primary" onclick={() => onrestore(story.id)}>Restore</button>
-    {:else}
-      {#each nextActions(story) as action (action.state)}
-        <button class="primary" onclick={() => onpatch(story.id, { state: action.state })}>{action.label}</button>
-      {/each}
-      {#if story.state === 'started'}
-        <button onclick={() => onpatch(story.id, { state: 'unstarted' })} title="Back to unstarted">Unstart</button>
-      {/if}
-      {#if story.state === 'accepted' && me.is_admin}
-        <button onclick={() => onpatch(story.id, { state: 'delivered' })} title="Admin: undo acceptance (affects velocity)">Reopen</button>
-      {/if}
+    {:else if story.state === 'accepted' && me.is_admin}
+      <!-- The row above already has the state buttons; reopening is the one
+           transition it does not offer. -->
+      <button class="tinted" onclick={() => onpatch(story.id, { state: 'delivered' })} title="Admin: undo acceptance (affects velocity)">Reopen</button>
     {/if}
     <button onclick={onclose} title="Collapse (Esc)" aria-label="Collapse">✕</button>
   </header>
@@ -375,7 +369,7 @@
       {#if !frozen}
         <form class="inline" onsubmit={addTask}>
           <input bind:value={newTask} placeholder="Add a task…" maxlength="500" aria-label="New task" />
-          <button disabled={!newTask.trim()}>Add</button>
+          <button class="tinted" disabled={!newTask.trim()}>Add</button>
         </form>
       {/if}
     </section>
@@ -435,7 +429,7 @@
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) e.currentTarget.form?.requestSubmit()
           }}
         ></textarea>
-        <button disabled={!commentBody.trim()}>Post comment</button>
+        <button class="tinted" disabled={!commentBody.trim()}>Post comment</button>
       </form>
       {/if}
     </section>
@@ -452,10 +446,10 @@
       {:else if trashed}
         <span class="muted">In the trash; purged 30 days after deletion.</span>
       {:else if confirmDelete}
-        <button class="danger" onclick={() => ondelete(story.id)}>Move to trash</button>
+        <button class="tinted danger" onclick={() => ondelete(story.id)}>Move to trash</button>
         <button onclick={() => (confirmDelete = false)}>Keep</button>
       {:else}
-        <button class="danger" onclick={() => (confirmDelete = true)}>Delete story</button>
+        <button class="tinted danger" onclick={() => (confirmDelete = true)}>Delete story</button>
       {/if}
     </footer>
   </div>

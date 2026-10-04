@@ -143,6 +143,24 @@ button.link {
   color: var(--accent);
 }
 
+/* Tinted: an outline and a light fill in the button's own colour, with bold
+   text in a stronger shade of it (darker on light, lighter on dark). */
+button.tinted {
+  --tone: var(--accent);
+  border-color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 16%, var(--row));
+  color: color-mix(in srgb, var(--tone) 75%, var(--text));
+  font-weight: 600;
+}
+
+button.tinted.danger {
+  --tone: var(--danger);
+}
+
+button.tinted:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--tone) 30%, var(--row));
+}
+
 /* Hover states. :where() keeps them at zero specificity so a component that
    styles its own buttons (the story row's action strip) is never overridden. */
 :where(button:hover:not(:disabled)) {
