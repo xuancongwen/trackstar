@@ -74,7 +74,9 @@ log "Uploading"
 STAGE=$(remote 'mktemp -d /tmp/trackstar-deploy.XXXXXX')
 # shellcheck disable=SC2064
 trap "ssh ${SSH_OPTS[*]} $TARGET 'rm -rf $STAGE' >/dev/null 2>&1 || true" EXIT
-tar -C "$ROOT_DIR" --exclude=deploy/deploy.env --exclude=deploy/deploy.sh -czf - scripts deploy -C "$(dirname "$OUT")" "$(basename "$OUT")" \
+# --no-xattrs / COPYFILE_DISABLE: macOS bsdtar would otherwise add xattr and
+# ._ AppleDouble entries that GNU tar on the server warns about.
+COPYFILE_DISABLE=1 tar --no-xattrs -C "$ROOT_DIR" --exclude=deploy/deploy.env --exclude=deploy/deploy.sh -czf - scripts deploy -C "$(dirname "$OUT")" "$(basename "$OUT")" \
   | remote "tar -xzf - --no-same-owner -C '$STAGE' && mv '$STAGE/$(basename "$OUT")' '$STAGE/trackstar'"
 
 if ! remote "test -f /etc/trackstar/trackstar.env && test -x /usr/local/bin/trackstar"; then
