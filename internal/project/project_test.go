@@ -2,11 +2,13 @@ package project
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
 	"trackstar/internal/apperr"
 	"trackstar/internal/database"
+	"trackstar/internal/database/dbgen"
 	"trackstar/internal/testutil"
 )
 
@@ -29,6 +31,39 @@ func TestCreateDefaultsAndUniqueSlug(t *testing.T) {
 	}
 	if p2.Slug != "apollo-launch-pad-2" {
 		t.Fatalf("slug = %q", p2.Slug)
+	}
+}
+
+func TestNumericNamesGetResolvableSlugs(t *testing.T) {
+	ctx := context.Background()
+	db := database.NewTestDB(t)
+	svc := NewService(db, nil)
+
+	p, err := svc.Create(ctx, 0, Input{Name: ptr("2026")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Slug != "project-2026" {
+		t.Fatalf("slug = %q", p.Slug)
+	}
+	if got, err := svc.Resolve(ctx, p.Slug); err != nil || got.ID != p.ID {
+		t.Fatalf("resolve by slug: %+v, %v", got, err)
+	}
+
+	// A project created before slugs were kept non-numeric still resolves by
+	// its all-digit slug, while an id that exists wins over it.
+	old, err := db.CreateProject(ctx, dbgen.CreateProjectParams{Name: "1999", Slug: "1999", IterationLengthDays: 7, IterationStartWeekday: 1, VelocityWindow: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := svc.Resolve(ctx, "1999"); err != nil || got.ID != old.ID {
+		t.Fatalf("resolve numeric slug: %+v, %v", got, err)
+	}
+	if got, err := svc.Resolve(ctx, strconv.FormatInt(p.ID, 10)); err != nil || got.ID != p.ID {
+		t.Fatalf("resolve by id: %+v, %v", got, err)
+	}
+	if _, err := svc.Resolve(ctx, "424242"); apperr.KindOf(err) != apperr.KindNotFound {
+		t.Fatalf("unknown ref: %v", err)
 	}
 }
 

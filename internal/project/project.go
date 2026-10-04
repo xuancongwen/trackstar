@@ -158,7 +158,12 @@ func (s *Service) Get(ctx context.Context, id int64) (Project, error) {
 // Resolve looks a project up by numeric id or by slug.
 func (s *Service) Resolve(ctx context.Context, ref string) (Project, error) {
 	if id, err := strconv.ParseInt(ref, 10, 64); err == nil {
-		return s.Get(ctx, id)
+		p, err := s.Get(ctx, id)
+		if apperr.KindOf(err) != apperr.KindNotFound {
+			return p, err
+		}
+		// Projects created before slugs were kept non-numeric may have one
+		// that is all digits ("2026"); try it as a slug before giving up.
 	}
 	row, err := s.store.GetProjectBySlug(ctx, ref)
 	if database.IsNotFound(err) {
@@ -305,10 +310,12 @@ func apply(p *Project, in Input) error {
 	return nil
 }
 
-// Slugify lower-cases name and collapses everything that is not a letter or
-// digit into single dashes.
 func trimSpaces(v string) string { return strings.Join(strings.Fields(v), " ") }
 
+// Slugify lower-cases name and collapses everything that is not a letter or
+// digit into single dashes. A slug that would be all digits gets a
+// "project-" prefix, because project references that are all digits are
+// read as ids.
 func Slugify(name string) string {
 	var b strings.Builder
 	dash := false
@@ -323,10 +330,14 @@ func Slugify(name string) string {
 			dash = true
 		}
 	}
-	if b.Len() == 0 {
+	slug := b.String()
+	if slug == "" {
 		return "project"
 	}
-	return b.String()
+	if strings.Trim(slug, "0123456789") == "" {
+		return "project-" + slug
+	}
+	return slug
 }
 
 func uniqueSlug(ctx context.Context, q dbgen.Querier, name string) (string, error) {
