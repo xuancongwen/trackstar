@@ -143,6 +143,34 @@ try {
   await page.waitForSelector('.live.live')
   t.eq('switching opens the other board', await page.$eval('.switcher > button strong', (e) => e.textContent.trim()), 'Zephyr')
   t.eq('switcher closed after picking', await page.$('.switcher-items'), null)
+
+  // --- opening a story low in a long column scrolls its details into view
+  const long = await api('POST', '/api/projects', { name: 'Longboard' })
+  for (let i = 0; i < 30; i++) await api('POST', `/api/projects/${long.id}/stories`, { title: `Row ${i}`, type: 'chore', section: 'current' })
+  const lp = await openBoard(browser, trackstar.base, cookie, long.slug, errors)
+  const scrolled = () =>
+    lp.evaluate(() => {
+      const scroller = document.querySelector('[data-section="current"]').closest('.scroll')
+      const box = scroller.getBoundingClientRect()
+      const editor = document.querySelector('.editor')?.getBoundingClientRect()
+      const row = document.querySelector('.editor')?.previousElementSibling.getBoundingClientRect()
+      return { top: scroller.scrollTop, rowOnTop: row && Math.abs(row.top - box.top) < 2, rowShown: row && row.top >= box.top - 1, editorShown: editor && editor.bottom <= box.bottom + 1 }
+    })
+  await lp.click(`${await storyId(lp, 'Row 0').then(sel)} .title`)
+  await lp.waitForSelector('.editor'); await sleep(600)
+  t.eq('a story in view does not scroll', (await scrolled()).top, 0)
+  await lp.keyboard.press('Escape'); await sleep(200)
+  // The bottom row sits just inside the column; its details are below it.
+  await lp.evaluate(() => {
+    const scroller = document.querySelector('[data-section="current"]').closest('.scroll')
+    const last = [...scroller.querySelectorAll('[data-story-id]')].at(-1)
+    scroller.scrollTop += last.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom
+  })
+  await lp.click(`${await storyId(lp, 'Row 29').then(sel)} .title`)
+  await lp.waitForSelector('.editor'); await sleep(600)
+  const after = await scrolled()
+  t.eq('the bottom story scrolls up: details shown or row at the top, row still on screen', [after.rowShown, after.editorShown || after.rowOnTop], [true, true])
+  await lp.close()
 } finally {
   await browser.close()
   trackstar.stop()

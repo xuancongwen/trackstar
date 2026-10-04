@@ -595,6 +595,34 @@
     event.preventDefault()
   }
 
+  // Opening a story low in a column scrolls the column just far enough to
+  // show its details, but never so far that the row itself leaves the top.
+  // The editor grows once its comments and history load, so keep following
+  // it for a moment.
+  $effect(() => {
+    if (openId === null) return
+    let done = false
+    let observer: ResizeObserver | undefined
+    tick().then(() => {
+      const editor = document.querySelector<HTMLElement>('section.editor')
+      const scroller = editor?.closest<HTMLElement>('.scroll')
+      const row = editor?.previousElementSibling
+      if (done || !editor || !scroller || !row) return
+      observer = new ResizeObserver(() => {
+        const box = scroller.getBoundingClientRect()
+        const by = Math.min(editor.getBoundingClientRect().bottom - box.bottom, row.getBoundingClientRect().top - box.top)
+        if (by > 0) scroller.scrollBy({ top: by })
+      })
+      observer.observe(editor)
+    })
+    const stop = setTimeout(() => observer?.disconnect(), 1000)
+    return () => {
+      done = true
+      clearTimeout(stop)
+      observer?.disconnect()
+    }
+  })
+
   // Click expands the row; clicking the expanded row again collapses it.
   const openStoryRow = (story: Story) => {
     selectedId = story.id
