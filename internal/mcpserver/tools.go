@@ -60,6 +60,7 @@ func tool[In, Out any](srv *mcp.Server, t *mcp.Tool, h mcp.ToolHandlerFor[In, Ou
 
 func (s *server) addTools(srv *mcp.Server) {
 	tool(srv, &mcp.Tool{Name: "list_projects", Description: "List the projects you can see, with their iteration settings. Archived projects (read-only, archived_at set) are left out unless include_archived is true.", Annotations: readOnly}, s.listProjects)
+	tool(srv, &mcp.Tool{Name: "create_project", Description: "Create a project. You become its owner, so it is visible only to you until members are added in the web app. The slug is derived from the name and returned with the project. Settings left out get the defaults (one-week iterations starting Monday).", Annotations: additive}, s.createProject)
 	tool(srv, &mcp.Tool{Name: "list_users", Description: "List user accounts (id, name, email) so owner_id and requester_id can be resolved to people.", Annotations: readOnly}, s.listUsers)
 	tool(srv, &mcp.Tool{Name: "list_stories", Description: "List a project's stories in board order, optionally one section only or matching a search. Live stories (icebox, backlog, current) come back together unless section is given; section \"done\" returns stories accepted in earlier iterations.", Annotations: readOnly}, s.listStories)
 	tool(srv, &mcp.Tool{Name: "get_story", Description: "Get one story with its comments, tasks and activity history.", Annotations: readOnly}, s.getStory)
@@ -103,6 +104,32 @@ func (s *server) listProjects(ctx context.Context, _ *mcp.CallToolRequest, in li
 		projects = active
 	}
 	return nil, projectsOut{Projects: projects}, nil
+}
+
+type createProjectIn struct {
+	Name                  string  `json:"name"`
+	Description           *string `json:"description,omitempty"`
+	IterationLengthDays   *int64  `json:"iteration_length_days,omitempty" jsonschema:"7, 14, 21 or 28"`
+	IterationStartWeekday *int64  `json:"iteration_start_weekday,omitempty" jsonschema:"0 (Sunday) to 6 (Saturday)"`
+	VelocityWindow        *int64  `json:"velocity_window,omitempty" jsonschema:"iterations averaged for velocity, 1 to 12"`
+	EstimateBugsAndChores *bool   `json:"estimate_bugs_and_chores,omitempty"`
+	CombineIceboxBacklog  *bool   `json:"combine_icebox_backlog,omitempty" jsonschema:"show icebox and backlog as one panel; defaults to your account setting"`
+}
+
+func (s *server) createProject(ctx context.Context, _ *mcp.CallToolRequest, in createProjectIn) (*mcp.CallToolResult, project.Project, error) {
+	u, err := userFrom(ctx)
+	if err != nil {
+		return nil, project.Project{}, err
+	}
+	p, err := s.deps.Projects.Create(ctx, u.ID, project.Input{
+		Name: &in.Name, Description: in.Description,
+		IterationLengthDays: in.IterationLengthDays, IterationStartWeekday: in.IterationStartWeekday,
+		VelocityWindow: in.VelocityWindow, EstimateBugsAndChores: in.EstimateBugsAndChores, CombineIceboxBacklog: in.CombineIceboxBacklog,
+	})
+	if err != nil {
+		return nil, project.Project{}, s.fail(err)
+	}
+	return nil, p, nil
 }
 
 type userOut struct {

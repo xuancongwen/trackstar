@@ -664,6 +664,7 @@ Tools (a project is named by numeric id or slug):
 | Tool | What it does |
 |---|---|
 | `list_projects` | projects you can see, with iteration settings; `include_archived` adds archived (read-only) ones |
+| `create_project` | name, description, iteration settings; you become the owner and the slug comes from the name |
 | `list_users` | ids → names, so `owner_id` can be resolved; includes `me` |
 | `list_stories` | a project's stories in board order; `section` (icebox, backlog, current, done) and `query` filters |
 | `get_story` | one story with comments, tasks and activity |
@@ -681,11 +682,10 @@ Resources: `trackstar://projects/{project}/current` and `…/backlog` return
 the section as JSON for attaching as context. The server's instructions
 explain sections, the workflow and move semantics to the model.
 
-Deliberately absent: delete/restore, epic and member management, anything
-about accounts or tokens. Errors come back as tool errors with the API's
-message (`story 42 not found`, `project apollo not found` for one the acting
-user is not a member of),
-so the model can correct itself. Each tool call is one HTTP request with no
+Deliberately absent: delete/restore, changing or archiving projects, epic
+and member management, anything about accounts or tokens. Errors come back
+as tool errors with the API's message (`story 42 not found`, `project apollo
+not found` for one the acting user is not a member of), so the model can correct itself. Each tool call is one HTTP request with no
 server-side session: nothing to keep alive through the tunnel, nothing lost
 on a restart, and a revoked token or disconnected app stops the agent on its
 next call.

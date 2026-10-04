@@ -68,7 +68,15 @@ func TestMCPOverHTTP(t *testing.T) {
 	if err != nil || !res.IsError {
 		t.Fatalf("create in missing project: %+v, %v", res, err)
 	}
-	browser.must(http.StatusCreated, "POST", "/api/projects", map[string]any{"name": "Apollo"}, nil)
+	res, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "create_project", Arguments: map[string]any{"name": "Apollo"}})
+	if err != nil || res.IsError {
+		t.Fatalf("create_project: %+v, %v", res, err)
+	}
+	var projects []map[string]any
+	browser.must(http.StatusOK, "GET", "/api/projects", nil, &projects)
+	if len(projects) != 1 || projects[0]["slug"] != "apollo" {
+		t.Fatalf("projects via REST = %v", projects)
+	}
 	res, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "create_story", Arguments: map[string]any{"project": "apollo", "title": "From MCP", "section": "backlog"}})
 	if err != nil || res.IsError {
 		t.Fatalf("create_story: %+v, %v", res, err)

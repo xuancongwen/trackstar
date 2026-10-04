@@ -122,7 +122,7 @@ func TestToolsAreListedWithSchemas(t *testing.T) {
 			t.Errorf("%s has no input schema", tool.Name)
 		}
 	}
-	want := []string{"add_comment", "create_stories", "create_story", "get_story", "list_epics", "list_projects", "list_stories", "list_users", "move_stories", "move_story", "update_stories", "update_story", "velocity"}
+	want := []string{"add_comment", "create_project", "create_stories", "create_story", "get_story", "list_epics", "list_projects", "list_stories", "list_users", "move_stories", "move_story", "update_stories", "update_story", "velocity"}
 	got := strings.Join(sorted(names), ",")
 	if got != strings.Join(want, ",") {
 		t.Fatalf("tools = %s", got)
@@ -654,6 +654,63 @@ func TestUpdateStories(t *testing.T) {
 	}
 	if msg := call(t, f.connect(t, f.kim), "update_stories", map[string]any{"items": []map[string]any{{"id": b.ID, "title": "x"}}}, &out); msg != "" || out.Failed != 1 || !strings.Contains(out.Results[0].Error, "not found") {
 		t.Fatalf("non-member: %q %+v", msg, out)
+	}
+}
+
+func TestCreateProject(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	kim := f.connect(t, f.kim)
+
+	var p project.Project
+	mustCall(t, kim, "create_project", map[string]any{
+		"name": "  Gemini ", "description": "Second programme", "iteration_length_days": 14,
+		"iteration_start_weekday": 3, "estimate_bugs_and_chores": true,
+	}, &p)
+	if p.ID == 0 || p.Name != "Gemini" || p.Slug != "gemini" || p.Description != "Second programme" ||
+		p.IterationLengthDays != 14 || p.IterationStartWeekday != 3 || !p.EstimateBugsAndChores ||
+		p.VelocityWindow != project.DefaultVelocityWindow || p.CombineIceboxBacklog {
+		t.Fatalf("created %+v", p)
+	}
+
+	// The caller owns it: it is in their list, they can file stories in it,
+	// and it is not open to anyone else.
+	members, err := f.deps.Projects.Members(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members) != 1 || members[0].UserID != f.kim.ID || members[0].Role != project.RoleOwner {
+		t.Fatalf("members = %+v", members)
+	}
+	var projects projectsOut
+	mustCall(t, kim, "list_projects", nil, &projects)
+	if len(projects.Projects) != 1 || projects.Projects[0].ID != p.ID {
+		t.Fatalf("kim sees %+v", projects)
+	}
+	var st story.Story
+	mustCall(t, kim, "create_story", map[string]any{"project": "gemini", "title": "First"}, &st)
+	if st.ProjectID != p.ID || st.RequesterID != f.kim.ID {
+		t.Fatalf("story %+v", st)
+	}
+	other, err := f.auth.Register(ctx, auth.RegisterInput{Email: "lee@example.com", Password: "third password", DisplayName: "Lee"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg := call(t, f.connect(t, other), "list_stories", map[string]any{"project": "gemini"}, nil); !strings.Contains(msg, "not found") {
+		t.Fatalf("non-member list: %q", msg)
+	}
+
+	// Defaults, a taken name and the service's validation.
+	var dup project.Project
+	mustCall(t, kim, "create_project", map[string]any{"name": "Gemini"}, &dup)
+	if dup.Slug != "gemini-2" || dup.IterationLengthDays != project.DefaultIterationLengthDays || dup.IterationStartWeekday != project.DefaultStartWeekday {
+		t.Fatalf("second Gemini %+v", dup)
+	}
+	if msg := call(t, kim, "create_project", map[string]any{"name": " "}, nil); !strings.Contains(msg, "name is required") {
+		t.Fatalf("blank name: %q", msg)
+	}
+	if msg := call(t, kim, "create_project", map[string]any{"name": "X", "iteration_length_days": 10}, nil); !strings.Contains(msg, "iteration length") {
+		t.Fatalf("bad iteration length: %q", msg)
 	}
 }
 
