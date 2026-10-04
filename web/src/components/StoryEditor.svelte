@@ -230,9 +230,11 @@
       <span class="muted">read-only</span>
     {:else if trashed}
       <button class="primary" onclick={() => onrestore(story.id)}>Restore</button>
+    {:else if story.state === 'started'}
+      <!-- The row above already has the forward state buttons; only the
+           backward transitions it does not offer appear here. -->
+      <button class="tinted" onclick={() => onpatch(story.id, { state: 'unstarted' })} title="Back to unstarted">Unstart</button>
     {:else if story.state === 'accepted' && me.is_admin}
-      <!-- The row above already has the state buttons; reopening is the one
-           transition it does not offer. -->
       <button class="tinted" onclick={() => onpatch(story.id, { state: 'delivered' })} title="Admin: undo acceptance (affects velocity)">Reopen</button>
     {/if}
     <button onclick={onclose} title="Collapse (Esc)" aria-label="Collapse">✕</button>
