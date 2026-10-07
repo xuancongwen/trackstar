@@ -20,7 +20,7 @@ dev: web/node_modules
 		echo "       Fix with: sudo chown -R $$(id -un): $(DEV_DATA_DIR)   # or: make dev DEV_DATA_DIR=<other dir>"; \
 		exit 1; \
 	fi
-	@trap 'kill 0 2>/dev/null' INT TERM EXIT; \
+	@trap 'trap - INT TERM EXIT; kill 0 2>/dev/null' INT TERM EXIT; \
 	( TRACKSTAR_ADDR=127.0.0.1:$(DEV_API_PORT) TRACKSTAR_DATA_DIR=$(DEV_DATA_DIR) TRACKSTAR_PUBLIC_URL=http://localhost:$(DEV_PORT)/ TRACKSTAR_LOG_LEVEL=debug \
 	    go run ./cmd/trackstar; echo "backend exited; stopping"; kill 0 ) & \
 	( TRACKSTAR_DEV_PORT=$(DEV_PORT) TRACKSTAR_DEV_BACKEND=http://127.0.0.1:$(DEV_API_PORT) npm --prefix web run dev; echo "vite exited; stopping"; kill 0 ) & \
