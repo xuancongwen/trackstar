@@ -97,6 +97,21 @@ export function applyMove(stories: Story[], movedId: number, section: DropSectio
   )
 }
 
+/**
+ * Optimistic version of a workflow change so the row updates instantly; the
+ * server response replaces it. Starting a story from the icebox or backlog
+ * moves it to the bottom of the current iteration, as the server does.
+ */
+export function applyState(stories: Story[], id: number, state: StoryState, now = new Date()): Story[] {
+  const story = stories.find((s) => s.id === id)
+  if (!story) return stories
+  const section = IN_PROGRESS.includes(state) || state === 'accepted' ? 'current' : story.section
+  const position =
+    section === story.section ? story.position : Math.max(0, ...sectionStories(stories, 'current').map((s) => s.position)) + 1
+  const accepted_at = state === 'accepted' ? now.toISOString() : null
+  return stories.map((s) => (s.id === id ? { ...s, state, section, position, accepted_at } : s))
+}
+
 export interface Action {
   label: string
   state: StoryState

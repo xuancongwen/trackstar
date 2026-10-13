@@ -15,7 +15,6 @@
     /** The story expanded in place; `editor` renders under its row. */
     openId?: number | null
     editor?: Snippet<[Story]>
-    busyIds: Set<number>
     recentIds?: Set<number>
     checkedIds?: Set<number>
     epicNames?: Set<string>
@@ -48,7 +47,6 @@
     selectedId,
     openId = null,
     editor,
-    busyIds,
     recentIds = new Set(),
     checkedIds = new Set(),
     epicNames = new Set(),
@@ -120,7 +118,6 @@
           {users}
           selected={row.story.id === selectedId}
           open={row.story.id === openId}
-          busy={busyIds.has(row.story.id)}
           recent={recentIds.has(row.story.id)}
           checked={checkedIds.has(row.story.id)}
           {epicNames}

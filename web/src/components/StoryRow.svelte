@@ -9,7 +9,6 @@
     selected?: boolean
     /** Expanded: the editor is rendered right below this row. */
     open?: boolean
-    busy?: boolean
     /** Just changed by someone else. */
     recent?: boolean
     /** Part of a multi-selection. */
@@ -28,7 +27,6 @@
     users,
     selected = false,
     open = false,
-    busy = false,
     recent = false,
     checked = false,
     epicNames = new Set(),
@@ -93,7 +91,6 @@
       <span class="estimates" role="group" aria-label="Estimate">
         {#each ESTIMATES as pts (pts)}
           <button
-            disabled={busy}
             title={`Estimate ${pts} point${pts === 1 ? '' : 's'}`}
             onclick={(e) => {
               e.stopPropagation()
@@ -107,7 +104,6 @@
       {#each actions as action (action.state)}
         <button
           class="action {action.tone}"
-          disabled={busy}
           onclick={(e) => {
             e.stopPropagation()
             onaction(story, action.state)

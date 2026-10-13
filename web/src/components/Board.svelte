@@ -4,6 +4,7 @@
   import {
     acceptedThisIteration,
     applyMove,
+    applyState,
     bulkMoveRequest,
     canDrop,
     moveRequest,
@@ -633,11 +634,18 @@
     const selected = stories.find((s) => s.id === selectedId)
     return selected && selected.section !== 'done' ? selected.section : 'icebox'
   }
+  // Workflow buttons update the row at once; the server response replaces
+  // it, and a failure reloads the board. A row waiting on the server ignores
+  // further clicks rather than greying out its buttons.
   const act = (story: Story, state: StoryState) => {
-    if (readOnly) return
+    if (readOnly || busyIds.has(story.id)) return
+    stories = applyState(stories, story.id, state) // optimistic
     patchStory(story.id, { state })
   }
-  const estimate = (story: Story, points: number) => patchStory(story.id, { estimate: points })
+  const estimate = (story: Story, points: number) => {
+    if (busyIds.has(story.id)) return
+    patchStory(story.id, { estimate: points })
+  }
   const mayDrop = (id: number, target: DropSection) => {
     if (readOnly) return false
     const story = stories.find((s) => s.id === id)
@@ -794,7 +802,6 @@
           {selectedId}
           {openId}
           {editor}
-          {busyIds}
           {recentIds}
           checkedIds={checked}
           {epicNames}

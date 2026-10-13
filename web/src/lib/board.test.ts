@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   acceptedThisIteration,
   applyMove,
+  applyState,
   bulkMoveRequest,
   orderedSelection,
   canDrop,
@@ -112,6 +113,38 @@ describe('nextActions', () => {
     expect(labels('delivered')).toEqual(['Accept→accepted', 'Reject→rejected'])
     expect(labels('rejected')).toEqual(['Restart→started'])
     expect(labels('accepted')).toEqual([])
+  })
+})
+
+describe('applyState', () => {
+  const board = () => [
+    makeStory({ id: 1, section: 'current', state: 'started', position: 10 }),
+    makeStory({ id: 2, section: 'current', state: 'delivered', position: 20 }),
+    makeStory({ id: 3, section: 'backlog', state: 'backlog', position: 5 }),
+  ]
+
+  it('changes the state in place within the current iteration', () => {
+    const next = applyState(board(), 1, 'finished')
+    expect(next.find((s) => s.id === 1)).toMatchObject({ state: 'finished', section: 'current', position: 10 })
+  })
+
+  it('stamps acceptance', () => {
+    const now = new Date('2026-10-12T10:00:00Z')
+    expect(applyState(board(), 2, 'accepted', now).find((s) => s.id === 2)).toMatchObject({
+      state: 'accepted',
+      accepted_at: '2026-10-12T10:00:00.000Z',
+    })
+  })
+
+  it('moves a started backlog story to the bottom of the current iteration', () => {
+    const next = applyState(board(), 3, 'started')
+    expect(next.find((s) => s.id === 3)).toMatchObject({ state: 'started', section: 'current', position: 21 })
+    expect(ids(sectionStories(next, 'current'))).toEqual([1, 2, 3])
+  })
+
+  it('leaves the list alone for an unknown story', () => {
+    const before = board()
+    expect(applyState(before, 99, 'started')).toBe(before)
   })
 })
 
